@@ -46,6 +46,8 @@ usertrap(void)
   w_stvec((uint64)kernelvec);
 
   struct proc *p = myproc();
+
+  uint64 r_scause_val = r_scause();
   
   // save user program counter.
   p->tf->epc = r_sepc();
@@ -68,11 +70,38 @@ usertrap(void)
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
+    // process the page fault
+    while (r_scause_val == 13 || r_scause_val == 15) {
+      uint64 fault_v_addr = r_stval();
+      if (fault_v_addr >= KERNBASE || fault_v_addr >= p->sz) {
+        break;
+      }
+      fault_v_addr = PGROUNDDOWN(fault_v_addr);
+
+      char *mem;
+      pagetable_t pagetable = p->pagetable;
+      mem = kalloc();
+      if(mem == 0){
+        // printf("usertrap: kalloc fails va: %p\n", fault_v_addr);
+        break;
+      }
+      memset(mem, 0, PGSIZE);
+      if(mappages(pagetable, fault_v_addr, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
+        kfree(mem);
+        printf("usertrap: mappages fails va: %p\n", fault_v_addr);
+        break;
+      }
+
+      // printf("usertrap allocate\n");
+      goto page_fault;
+    }
+
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
   }
 
+page_fault:
   if(p->killed)
     exit(-1);
 

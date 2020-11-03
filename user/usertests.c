@@ -2127,7 +2127,7 @@ main(int argc, char *argv[])
     {reparent2, "reparent2"},
     {pgbug, "pgbug" },
     {sbrkbugs, "sbrkbugs" },
-    // {badwrite, "badwrite" },
+    // {badwrite, "badwrite" }, // do not uncomment
     {badarg, "badarg" },
     {reparent, "reparent" },
     {twochildren, "twochildren"},
@@ -2146,7 +2146,7 @@ main(int argc, char *argv[])
     {bigargtest, "bigargtest"},
     {bigwrite, "bigwrite"},
     {bsstest, "bsstest"},
-    // {sbrkbasic, "sbrkbasic"},
+    // {sbrkbasic, "sbrkbasic"}, // do not uncomment
     {sbrkmuch, "sbrkmuch"},
     {kernmem, "kernmem"},
     {sbrkfail, "sbrkfail"},
@@ -2160,7 +2160,7 @@ main(int argc, char *argv[])
     {openiputtest, "openiput"},
     {exitiputtest, "exitiput"},
     {iputtest, "iput"},
-    // {mem, "mem"},
+    // {mem, "mem"}, // do not uncomment
     {pipe1, "pipe1"},
     {preempt, "preempt"},
     {exitwait, "exitwait"},

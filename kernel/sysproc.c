@@ -41,14 +41,30 @@ sys_wait(void)
 uint64
 sys_sbrk(void)
 {
-  int addr;
+  // printf("sbrk() run...\n");
   int n;
+  struct proc *p = myproc();
+  int addr = p->sz;
 
   if(argint(0, &n) < 0)
     return -1;
-  addr = myproc()->sz;
-  if(growproc(n) < 0)
+
+  if (addr + n >= KERNBASE) {
     return -1;
+  }
+
+  if (n < 0 && -n > p->sz) {
+    return -1;
+  }
+
+  // printf("sbrk(): allocate %d\n", n);
+
+  p->sz += n;
+  // if(growproc(n) < 0)
+  //   return -1;
+  if (n < 0) {
+    p->sz = uvmdealloc(p->pagetable, addr, p->sz);
+  }
   return addr;
 }
 
