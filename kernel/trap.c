@@ -49,8 +49,10 @@ usertrap(void)
   
   // save user program counter.
   p->tf->epc = r_sepc();
+
+  uint64 r_scause_val = r_scause();
   
-  if(r_scause() == 8){
+  if(r_scause_val == 8){
     // system call
 
     if(p->killed)
@@ -68,11 +70,53 @@ usertrap(void)
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
+    while (r_scause_val == 15) {
+      pagetable_t pagetable = p->pagetable;
+      pte_t *pte;
+      uint flags;
+      uint64 fault_v_addr = r_stval();
+      char *mem;
+
+      if (fault_v_addr >= KERNBASE || fault_v_addr >= p->sz) {
+        break;
+      }
+
+      if((pte = get_pte(pagetable, fault_v_addr)) == 0) {
+        panic("usertrap: pte should exist");
+      }
+      flags = PTE_FLAGS(*pte);
+      if (!(flags & PTE_COW)) {
+        printf("usertrap: encounter to trap but not cow\n");
+        break;
+      }
+      fault_v_addr = PGROUNDDOWN(fault_v_addr);
+      
+      mem = kalloc();
+      if(mem == 0){
+        printf("usertrap: kalloc fails va: %p\n", fault_v_addr);
+        break;
+      }
+      // add_alloc();
+      // printf("usertrap: do cow\n");
+
+      memmove(mem, (char*)PTE2PA(*pte), PGSIZE); // copy the content to the new page
+      uvmunmap(pagetable, fault_v_addr, PGSIZE, 1);
+      if(mappages(pagetable, fault_v_addr, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
+        kfree(mem);
+        printf("usertrap: mappages fails va: %p\n", fault_v_addr);
+        break;
+      }
+
+      goto page_fault;
+    }
+
+    printf("alloc: %d\n", get_alloc());
+    printf("unalloc: %d\n", get_unalloc());
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
   }
-
+page_fault:
   if(p->killed)
     exit(-1);
 
@@ -137,6 +181,7 @@ kerneltrap()
   uint64 sepc = r_sepc();
   uint64 sstatus = r_sstatus();
   uint64 scause = r_scause();
+  // struct proc *p = myproc();
   
   if((sstatus & SSTATUS_SPP) == 0)
     panic("kerneltrap: not from supervisor mode");
@@ -144,11 +189,74 @@ kerneltrap()
     panic("kerneltrap: interrupts enabled");
 
   if((which_dev = devintr()) == 0){
+    // process the read page fault
+    // NOTICE there may be bug, be careful of the memset. I just set them as 0
+    // while (scause == 13) {
+    //   pagetable_t pagetable = p->pagetable;
+    //   uint64 fault_v_addr = r_stval();
+    //   char *mem;
+
+    //   fault_v_addr = PGROUNDDOWN(fault_v_addr);
+    //   mem = kalloc_nonlock();
+    //   if(mem == 0){
+    //     printf("kerneltrap: kalloc fails va: %p\n", fault_v_addr);
+    //     break;
+    //   }
+    //   memset(mem, 0, PGSIZE); // copy the content to the new page
+    //   if(mappages(pagetable, fault_v_addr, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
+    //     kfree(mem);
+    //     printf("kerneltrap: mappages fails va: %p\n", fault_v_addr);
+    //     break;
+    //   }
+
+    //   goto page_fault;
+    // }
+
+    // // process the write page fault. be careful of the cow
+    // while (scause == 15) {
+    //   pagetable_t pagetable = p->pagetable;
+    //   pte_t *pte;
+    //   uint flags;
+    //   uint64 fault_v_addr = r_stval();
+    //   char *mem;
+
+    //   if((pte = get_pte(pagetable, fault_v_addr)) == 0) {
+    //     panic("kerneltrap: pte should exist");
+    //   }
+    //   fault_v_addr = PGROUNDDOWN(fault_v_addr);
+      
+    //   mem = kalloc_nonlock();
+    //   if(mem == 0){
+    //     printf("kerneltrap: kalloc fails va: %p\n", fault_v_addr);
+    //     break;
+    //   }
+
+    //   flags = PTE_FLAGS(*pte);
+      
+    //   if (flags & PTE_COW) {
+    //     // this is a cow page
+    //     uvmunmap(pagetable, fault_v_addr, PGSIZE, 1);
+    //     memmove(mem, (char*)PTE2PA(*pte), PGSIZE); // copy the content to the new page
+    //   } else {
+    //     // NOTICE we can ignore the non-cow situation
+    //     printf("kerneltrap: encounter to a trap but not cow");
+    //     memset(mem, 0, PGSIZE);
+    //   }
+
+    //   if(mappages(pagetable, fault_v_addr, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
+    //     kfree(mem);
+    //     printf("kernrltrap: mappages fails va: %p\n", fault_v_addr);
+    //     break;
+    //   }
+
+    //   goto page_fault;
+    // }
+
     printf("scause %p\n", scause);
     printf("sepc=%p stval=%p\n", r_sepc(), r_stval());
     panic("kerneltrap");
   }
-
+// page_fault:
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2 && myproc() != 0 && myproc()->state == RUNNING)
     yield();

@@ -16,17 +16,81 @@ extern char end[]; // first address after kernel.
 
 struct run {
   struct run *next;
+  uint ref;
 };
 
 struct {
   struct spinlock lock;
   struct run *freelist;
+  uint alloc;
+  uint unalloc;
 } kmem;
+
+uint
+get_alloc() {
+  return kmem.alloc;
+}
+
+uint
+get_unalloc() {
+  return kmem.unalloc;
+}
+
+void
+add_alloc() {
+  kmem.alloc++;
+}
+
+void
+add_unalloc() {
+  kmem.unalloc++;
+}
+
+void
+add_ref(struct run *r) {
+  if (r < (struct run*)end || r > (struct run*)PHYSTOP) {
+    return;
+  }
+  acquire(&kmem.lock);
+  r->ref += 1;
+  
+  release(&kmem.lock);
+}
+
+void
+decr_ref(struct run *r) {
+  if (r < (struct run*)end || r > (struct run*)PHYSTOP) {
+    return;
+  }
+  acquire(&kmem.lock);
+  if (r->ref == 0) {
+    panic("decr_ref: r->ref==0\n");
+  }
+  r->ref -= 1;
+  release(&kmem.lock);
+}
+
+int
+is_ref_zero(struct run *r) {
+  if (r < (struct run*)end || r > (struct run*)PHYSTOP) {
+    panic("is_ref_zero: invalid va!\n");
+  }
+  acquire(&kmem.lock);
+  int ret = 1;
+  if (r->ref <= 0) {
+    ret = 0;
+  }
+  release(&kmem.lock);
+
+  return ret;
+}
 
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  kmem.alloc = 0;
+  kmem.unalloc = 0;
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -57,8 +121,13 @@ kfree(void *pa)
   r = (struct run*)pa;
 
   acquire(&kmem.lock);
+  if (r == 0) {
+    panic("kfree: r==0!\n");
+  }
   r->next = kmem.freelist;
   kmem.freelist = r;
+  r->ref = 0;
+  add_unalloc();
   release(&kmem.lock);
 }
 
@@ -72,11 +141,18 @@ kalloc(void)
 
   acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r)
+  // if (!r) {
+  //   panic("r == 0!\n");
+  // }
+  if(r) 
     kmem.freelist = r->next;
-  release(&kmem.lock);
-
-  if(r)
+  
+  if(r) {
+    add_alloc();
     memset((char*)r, 5, PGSIZE); // fill with junk
+  }
+  
+  release(&kmem.lock);
+  
   return (void*)r;
 }

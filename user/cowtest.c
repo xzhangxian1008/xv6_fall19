@@ -76,21 +76,27 @@ threetest()
       printf("fork failed");
       exit(-1);
     }
+    printf("threetest here 4\n");
     if(pid2 == 0){
+      printf("threetest here 5\n");
       for(char *q = p; q < p + (sz/5)*4; q += 4096){
         *(int*)q = getpid();
       }
+      printf("threetest here 6\n");
       for(char *q = p; q < p + (sz/5)*4; q += 4096){
         if(*(int*)q != getpid()){
           printf("wrong content\n");
           exit(-1);
         }
       }
+      printf("threetest here 7\n");
       exit(-1);
     }
+    printf("threetest here 8\n");
     for(char *q = p; q < p + (sz/2); q += 4096){
       *(int*)q = 9999;
     }
+    printf("threetest here 9\n");
     exit(0);
   }
 
@@ -177,17 +183,21 @@ filetest()
   printf("ok\n");
 }
 
+
 int
 main(int argc, char *argv[])
 {
-  simpletest();
+  // simpletest();
 
   // check that the first simpletest() freed the physical memory.
-  simpletest();
+  // simpletest();
 
   threetest();
+  printf("!!!!!!!!!!\n");
   threetest();
+  printf("##########\n");
   threetest();
+  printf("$$$$$$$$\n");
 
   filetest();
 

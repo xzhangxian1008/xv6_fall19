@@ -5,6 +5,7 @@
 int
 main(int argc, char *argv[])
 {
+  printf("echo run...\n");
   int i;
 
   for(i = 1; i < argc; i++){

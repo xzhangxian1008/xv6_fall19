@@ -8,6 +8,7 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
+struct run;
 
 // bio.c
 void            binit(void);
@@ -62,6 +63,13 @@ void            ramdiskrw(struct buf*);
 void*           kalloc(void);
 void            kfree(void *);
 void            kinit();
+void            add_ref(struct run *r);
+void            decr_ref(struct run *r);
+int             is_ref_zero(struct run *r);
+uint            get_alloc();
+uint            get_unalloc();
+void            add_alloc();
+void            add_unalloc();
 
 // log.c
 void            initlog(int, struct superblock*);
@@ -171,6 +179,8 @@ uint64          walkaddr(pagetable_t, uint64);
 int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
+pte_t*          get_pte(pagetable_t pagetable, uint64 va);
+void            vmprint(pagetable_t pt);
 
 // plic.c
 void            plicinit(void);

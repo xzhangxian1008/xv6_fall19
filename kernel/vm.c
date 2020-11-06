@@ -17,6 +17,53 @@ extern char trampoline[]; // trampoline.S
 
 void print(pagetable_t);
 
+// by xzx
+void vm_level_print(int level, int index, uint64 pt, pagetable_t pa) {
+  switch (level) {
+    case 2:
+      printf(" ..%d: pte %p pa: %p\n", index, pt, pa);
+      break;
+    case 1:
+      printf(" .. ..%d: pte %p pa: %p\n", index, pt, pa);
+      break;
+    case 0:
+      printf(" .. .. ..%d: pte %p pa: %p\n", index, pt, pa);
+      break;
+    default:
+      break;
+  }
+}
+
+// by xzx
+void traverse_vm(int level, int index, pagetable_t pt) {
+  vm_level_print(level, index, PA2PTE(pt), pt);
+  if (level == 0) {
+    return;
+  }
+  // there are 2^9 = 512 PTEs in a page table.
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pt[i]; 
+    if((pte & PTE_V)){
+      // this PTE points to a lower-level page table.
+      uint64 child = PTE2PA(pte);
+      traverse_vm(level - 1, i, (pagetable_t)child);
+    }
+  }
+}
+
+// by xzx
+void vmprint(pagetable_t pt) {
+  printf("page table %p\n", pt);
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pt[i];
+    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
+      // this PTE points to a lower-level page table.
+      uint64 child = PTE2PA(pte);
+      traverse_vm(2, i, (pagetable_t)child);
+    }
+  }
+}
+
 /*
  * create a direct-map page table for the kernel and
  * turn on paging. called early, in supervisor mode.
@@ -95,6 +142,11 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
   return &pagetable[PX(0, va)];
 }
 
+pte_t*
+get_pte(pagetable_t pagetable, uint64 va) {
+  return walk(pagetable, va, 0);
+}
+
 // Look up a virtual address, return the physical address,
 // or 0 if not mapped.
 // Can only be used to look up user pages.
@@ -163,11 +215,15 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
   for(;;){
     if((pte = walk(pagetable, a, 1)) == 0)
       return -1;
-    if(*pte & PTE_V)
-      panic("remap");
+    // if(*pte & PTE_V)
+    //   panic("remap");
+    if (pagetable != kernel_pagetable) {
+      add_ref((struct run*) pa); // add reference for this physical memory
+    }
     *pte = PA2PTE(pa) | perm | PTE_V;
     if(a == last)
       break;
+
     a += PGSIZE;
     pa += PGSIZE;
   }
@@ -197,7 +253,13 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 size, int do_free)
       panic("uvmunmap: not a leaf");
     if(do_free){
       pa = PTE2PA(*pte);
-      kfree((void*)pa);
+      decr_ref((struct run*) pa);
+      if (!is_ref_zero((struct run*) pa)) {
+        // printf("free %p ", pa);
+        // add_unalloc();
+        kfree((void*)pa);
+      }
+      // kfree((void*)pa);
     }
     *pte = 0;
     if(a == last)
@@ -310,6 +372,26 @@ uvmfree(pagetable_t pagetable, uint64 sz)
   freewalk(pagetable);
 }
 
+static void
+mark_as_cow(pagetable_t pagetable, uint64 va) {
+  if(va >= MAXVA)
+    panic("mark_no_write\n");
+
+  for(int level = 2; level > 0; level--) {
+    pte_t *pte = &pagetable[PX(level, va)];
+    if(*pte & PTE_V) {
+      pagetable = (pagetable_t)PTE2PA(*pte);
+    } else {
+      panic("mark_no_write: not found\n");
+    }
+  }
+  
+  if (pagetable[PX(0, va)] & PTE_W) {
+    pagetable[PX(0, va)] &= (~PTE_W);
+  }
+  pagetable[PX(0, va)] |= PTE_COW;
+}
+
 // Given a parent process's page table, copy
 // its memory into a child's page table.
 // Copies both the page table and the
@@ -322,7 +404,6 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
@@ -331,15 +412,46 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    flags &= (~PTE_W); // mark no write
+    flags |= PTE_COW; // mark as cow
+    // char *mem = kalloc();
+    // if (mem == 0) {
+    //   panic("uvmcopy mem == 0\n");
+    // }
+    // memmove(mem, (char*)pa, PGSIZE);
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
       goto err;
     }
+    mark_as_cow(old, i);
   }
   return 0;
+
+  // pte_t *pte;
+  // uint64 pa, i;
+  // uint flags;
+  // char *mem;
+
+  // for(i = 0; i < sz; i += PGSIZE){
+  //   if((pte = walk(old, i, 0)) == 0) {
+  //     continue;
+  //     // panic("uvmcopy: pte should exist");
+  //   }
+      
+  //   if((*pte & PTE_V) == 0) {
+  //     continue;
+  //     // panic("uvmcopy: page not present");
+  //   }
+  //   pa = PTE2PA(*pte);
+  //   flags = PTE_FLAGS(*pte);
+  //   if((mem = kalloc()) == 0)
+  //     goto err;
+  //   memmove(mem, (char*)pa, PGSIZE);
+  //   if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
+  //     kfree(mem);
+  //     goto err;
+  //   }
+  // }
+  // return 0;
 
  err:
   uvmunmap(new, 0, i, 1);
@@ -375,6 +487,26 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
+    
+    pte_t pte = PA2PTE(pa0);
+    uint flags = PTE_FLAGS(pte);
+    if (flags & PTE_COW) {
+      char *mem = kalloc();
+      if (mem == 0) {
+        printf("copyout: kalloc fail\n");
+        return -1;
+      }
+      // add_alloc();
+
+      memmove(mem, (char*)pa0, PGSIZE); // copy the content to the new page
+      uvmunmap(pagetable, va0, PGSIZE, 1);
+      if(mappages(pagetable, va0, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
+        kfree(mem);
+        printf("usertrap: mappages fails va: %p\n", va0);
+        break;
+      }
+    }
+
     memmove((void *)(pa0 + (dstva - va0)), src, n);
 
     len -= n;

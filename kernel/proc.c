@@ -261,6 +261,12 @@ fork(void)
     release(&np->lock);
     return -1;
   }
+  // printf("*********np*********\n");
+  // vmprint(np->pagetable);
+  // printf("*********p*********\n");
+  // vmprint(p->pagetable);
+
+  
   np->sz = p->sz;
 
   np->parent = p;
