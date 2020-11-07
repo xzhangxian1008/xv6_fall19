@@ -478,18 +478,20 @@ int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
   uint64 n, va0, pa0;
+  pte_t *pte;
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
+    pte = walk(pagetable, va0, 0);
+    
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
     
-    pte_t pte = PA2PTE(pa0);
-    uint flags = PTE_FLAGS(pte);
+    uint64 flags = PTE_FLAGS(*pte);
     if (flags & PTE_COW) {
       char *mem = kalloc();
       if (mem == 0) {
@@ -499,15 +501,18 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
       // add_alloc();
 
       memmove(mem, (char*)pa0, PGSIZE); // copy the content to the new page
+      memmove((void *)(mem + (dstva - va0)), (char*)src, n);
       uvmunmap(pagetable, va0, PGSIZE, 1);
-      if(mappages(pagetable, va0, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
+      flags &= (~PTE_COW);
+      flags |= PTE_W;
+      if(mappages(pagetable, va0, PGSIZE, (uint64)mem, flags) != 0){
         kfree(mem);
         printf("usertrap: mappages fails va: %p\n", va0);
         break;
       }
+    } else {
+      memmove((void *)(pa0 + (dstva - va0)), src, n);
     }
-
-    memmove((void *)(pa0 + (dstva - va0)), src, n);
 
     len -= n;
     src += n;

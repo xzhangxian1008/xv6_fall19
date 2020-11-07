@@ -101,7 +101,9 @@ usertrap(void)
 
       memmove(mem, (char*)PTE2PA(*pte), PGSIZE); // copy the content to the new page
       uvmunmap(pagetable, fault_v_addr, PGSIZE, 1);
-      if(mappages(pagetable, fault_v_addr, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
+      flags &= (~PTE_COW);
+      flags |= PTE_W;
+      if(mappages(pagetable, fault_v_addr, PGSIZE, (uint64)mem, flags) != 0){
         kfree(mem);
         printf("usertrap: mappages fails va: %p\n", fault_v_addr);
         break;
@@ -110,8 +112,6 @@ usertrap(void)
       goto page_fault;
     }
 
-    printf("alloc: %d\n", get_alloc());
-    printf("unalloc: %d\n", get_unalloc());
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;

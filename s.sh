@@ -6,8 +6,8 @@ reb_f="f"
 
 if [ $# = 0 ]
 then
-    # rm fs.img
-    # make fs.img
+    rm fs.img
+    make fs.img
     make qemu
     exit
 fi

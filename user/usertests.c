@@ -2127,7 +2127,7 @@ main(int argc, char *argv[])
     {reparent2, "reparent2"},
     {pgbug, "pgbug" },
     {sbrkbugs, "sbrkbugs" },
-    // {badwrite, "badwrite" },
+    // {badwrite, "badwrite" }, // do not comment
     {badarg, "badarg" },
     {reparent, "reparent" },
     {twochildren, "twochildren"},
@@ -2140,12 +2140,12 @@ main(int argc, char *argv[])
     {unlinkread, "unlinkread"},
     {concreate, "concreate"},
     {subdir, "subdir"},
-    {fourfiles, "fourfiles"},
+    {fourfiles, "fourfiles"}, // bug
     {sharedfd, "sharedfd"},
-    {exectest, "exectest"},
+    {exectest, "exectest"}, // bug
     {bigargtest, "bigargtest"},
     {bigwrite, "bigwrite"},
-    {bsstest, "bsstest"},
+    {bsstest, "bsstest"}, // bug
     {sbrkbasic, "sbrkbasic"},
     {sbrkmuch, "sbrkmuch"},
     {kernmem, "kernmem"},
@@ -2165,7 +2165,7 @@ main(int argc, char *argv[])
     {preempt, "preempt"},
     {exitwait, "exitwait"},
     {rmdot, "rmdot"},
-    {fourteen, "fourteen"},
+    {fourteen, "fourteen"}, // bug
     {bigfile, "bigfile"},
     {dirfile, "dirfile"},
     {iref, "iref"},
