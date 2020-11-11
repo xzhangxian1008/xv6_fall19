@@ -103,4 +103,10 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  // NOTICE fork() should copy them!
+  int interval;
+  uint last_time;
+  uint64 handler_func;
+  struct trapframe *cxt; // store the context when interrupted
 };

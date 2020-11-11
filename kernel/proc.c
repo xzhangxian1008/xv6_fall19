@@ -122,6 +122,14 @@ found:
   memset(&p->context, 0, sizeof p->context);
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
+  
+  p->interval = -1;
+  p->handler_func = 0;
+  p->last_time = 0;
+  if((p->cxt = (struct trapframe *)kalloc()) == 0){
+    printf("allocproc: p->cxt kalloc fail\n");
+    return 0;
+  }
 
   return p;
 }

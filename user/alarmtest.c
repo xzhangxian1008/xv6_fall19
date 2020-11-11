@@ -86,6 +86,8 @@ test1()
     if(count >= 10)
       break;
     foo(i, &j);
+    printf("i %d\n", i);
+    // printf("j %d\n", j);
   }
   if(count < 10){
     printf("\ntest1 failed: too few calls to the handler\n");
@@ -96,9 +98,9 @@ test1()
     // once possible source of errors is that the handler may
     // return somewhere other than where the timer interrupt
     // occurred; another is that that registers may not be
-    // restored correctly, causing i or j or the address ofj
+    // restored correctly, causing i or j or the address of j
     // to get an incorrect value.
-    printf("\ntest1 failed: foo() executed fewer times than it was called\n");
+    printf("\ntest1 failed: foo() executed fewer times than it was called. i %d j %d\n", i, j);
     exit(1);
   } else {
     printf("test1 passed\n");
