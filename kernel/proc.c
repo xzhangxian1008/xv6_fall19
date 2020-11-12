@@ -276,6 +276,12 @@ fork(void)
   // copy saved user registers.
   *(np->tf) = *(p->tf);
 
+  // copy the alarm fields
+  np->interval = p->interval;
+  np->last_time = p->last_time;
+  np->handler_func = p->handler_func;
+  *(np->cxt) = *(p->cxt);
+
   // Cause fork to return 0 in the child.
   np->tf->a0 = 0;
 
