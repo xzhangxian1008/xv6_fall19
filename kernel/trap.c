@@ -164,7 +164,7 @@ clockintr()
 {
   acquire(&tickslock);
   ticks++;
-  wakeup(&ticks);
+  wakeup(&ticks); // here wakeup the sleep proc periodically
   release(&tickslock);
 }
 
