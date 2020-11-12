@@ -104,7 +104,7 @@ thread_create(void (*func)())
   // YOUR CODE HERE
   t->context = (struct thread_cxt*)malloc(sizeof(struct thread_cxt));
   t->context->ra = (uint64)func;
-  t->context->sp = (uint64)(t->stack + (STACK_SIZE-1));
+  t->context->sp = (uint64)(t->stack + (STACK_SIZE));
 }
 
 void 
