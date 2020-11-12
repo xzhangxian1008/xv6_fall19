@@ -118,43 +118,6 @@ sys_sigalarm(void)
   p->last_time = ticks;
   release(&tickslock);
 
-  p->cxt->kernel_satp = p->tf->kernel_satp;
-  p->cxt->kernel_sp = p->tf->kernel_sp;
-  p->cxt->kernel_trap = p->tf->kernel_trap;
-  p->cxt->epc = p->tf->epc;
-  p->cxt->kernel_hartid = p->tf->kernel_hartid;
-  p->cxt->ra = p->tf->ra;
-  p->cxt->sp = p->tf->sp;
-  p->cxt->gp = p->tf->gp;
-  p->cxt->tp = p->tf->tp;
-  p->cxt->t0 = p->tf->t0;
-  p->cxt->t1 = p->tf->t1;
-  p->cxt->t2 = p->tf->t2;
-  p->cxt->s0 = p->tf->s0;
-  p->cxt->s1 = p->tf->s1;
-  p->cxt->a0 = p->tf->a0;
-  p->cxt->a1 = p->tf->a1;
-  p->cxt->a2 = p->tf->a2;
-  p->cxt->a3 = p->tf->a3;
-  p->cxt->a4 = p->tf->a4;
-  p->cxt->a5 = p->tf->a5;
-  p->cxt->a6 = p->tf->a6;
-  p->cxt->a7 = p->tf->a7;
-  p->cxt->s2 = p->tf->s2;
-  p->cxt->s3 = p->tf->s3;
-  p->cxt->s4 = p->tf->s4;
-  p->cxt->s5 = p->tf->s5;
-  p->cxt->s6 = p->tf->s6;
-  p->cxt->s7 = p->tf->s7;
-  p->cxt->s8 = p->tf->s8;
-  p->cxt->s9 = p->tf->s9;
-  p->cxt->s10 = p->tf->s10;
-  p->cxt->s11 = p->tf->s11;
-  p->cxt->t3 = p->tf->t3;
-  p->cxt->t4 = p->tf->t4;
-  p->cxt->t5 = p->tf->t5;
-  p->cxt->t6 = p->tf->t6;
-
   return 0;
 }
 
