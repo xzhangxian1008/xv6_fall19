@@ -2127,7 +2127,7 @@ main(int argc, char *argv[])
     {reparent2, "reparent2"},
     {pgbug, "pgbug" },
     {sbrkbugs, "sbrkbugs" },
-    // {badwrite, "badwrite" },
+    // {badwrite, "badwrite" }, // do not uncomment
     {badarg, "badarg" },
     {reparent, "reparent" },
     {twochildren, "twochildren"},

@@ -7,6 +7,8 @@
 #include "defs.h"
 #include "elf.h"
 
+extern int turn;
+
 static int loadseg(pde_t *pgdir, uint64 addr, struct inode *ip, uint offset, uint sz);
 
 int
@@ -37,6 +39,8 @@ exec(char *path, char **argv)
 
   if((pagetable = proc_pagetable(p)) == 0)
     goto bad;
+
+  change_turn();
 
   // Load program into memory.
   sz = 0;
@@ -140,8 +144,11 @@ loadseg(pagetable_t pagetable, uint64 va, struct inode *ip, uint offset, uint sz
 
   for(i = 0; i < sz; i += PGSIZE){
     pa = walkaddr(pagetable, va + i);
-    if(pa == 0)
+    if(pa == 0) {
+      printf("address: %p\n", va + i);
       panic("loadseg: address should exist");
+    }
+      
     if(sz - i < PGSIZE)
       n = sz - i;
     else

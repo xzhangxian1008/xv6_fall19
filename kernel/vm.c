@@ -15,7 +15,14 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+static int turn = 0;
+
 void print(pagetable_t);
+
+void
+change_turn() {
+  turn = 1;
+}
 
 /*
  * create a direct-map page table for the kernel and
@@ -82,17 +89,21 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
     panic("walk");
 
   for(int level = 2; level > 0; level--) {
-    pte_t *pte = &pagetable[PX(level, va)];
+    int index = PX(level, va);
+    pte_t *pte = &pagetable[index];
     if(*pte & PTE_V) {
       pagetable = (pagetable_t)PTE2PA(*pte);
     } else {
-      if(!alloc || (pagetable = (pde_t*)kalloc()) == 0)
+      if(!alloc || (pagetable = (pde_t*)kalloc()) == 0) {
         return 0;
+      }
+
       memset(pagetable, 0, PGSIZE);
       *pte = PA2PTE(pagetable) | PTE_V;
     }
   }
-  return &pagetable[PX(0, va)];
+  int index = PX(0, va);
+  return &pagetable[index];
 }
 
 // Look up a virtual address, return the physical address,
@@ -108,12 +119,15 @@ walkaddr(pagetable_t pagetable, uint64 va)
     return 0;
 
   pte = walk(pagetable, va, 0);
-  if(pte == 0)
+  if(pte == 0) {
     return 0;
-  if((*pte & PTE_V) == 0)
+  }
+  if((*pte & PTE_V) == 0) {
     return 0;
-  if((*pte & PTE_U) == 0)
+  }
+  if((*pte & PTE_U) == 0) {
     return 0;
+  }
   pa = PTE2PA(*pte);
   return pa;
 }
