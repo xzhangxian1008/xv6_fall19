@@ -2140,7 +2140,7 @@ main(int argc, char *argv[])
     {unlinkread, "unlinkread"},
     {concreate, "concreate"},
     {subdir, "subdir"},
-    {fourfiles, "fourfiles"},
+    {fourfiles, "fourfiles"}, // very low probability to fail after bcache's change
     {sharedfd, "sharedfd"},
     {exectest, "exectest"},
     {bigargtest, "bigargtest"},

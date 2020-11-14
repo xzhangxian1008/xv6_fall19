@@ -23,9 +23,14 @@
 #include "fs.h"
 #include "buf.h"
 
+#define SLOT_NUM 15
+
 struct {
-  struct spinlock lock;
+  // struct spinlock lock;
   struct buf buf[NBUF];
+
+  struct buf* hash_table[SLOT_NUM];
+  struct spinlock ht_locks[SLOT_NUM];
 
   // Linked list of all buffers, through prev/next.
   // head.next is most recently used.
@@ -36,18 +41,29 @@ void
 binit(void)
 {
   struct buf *b;
+  struct buf *head;
+  int num = 0; // used for allocating the buf
 
-  initlock(&bcache.lock, "bcache");
+  for (int i = 0; i < SLOT_NUM; i++, num++) {
+    initlock(&(bcache.ht_locks[i]), "bcache.slot");
+    b = &(bcache.buf[num]);
+    bcache.hash_table[i] = b;
+    b->prev = b;
+    b->next = b;
+    b->ht_index = i;
+  }
 
-  // Create linked list of buffers
-  bcache.head.prev = &bcache.head;
-  bcache.head.next = &bcache.head;
-  for(b = bcache.buf; b < bcache.buf+NBUF; b++){
-    b->next = bcache.head.next;
-    b->prev = &bcache.head;
-    initsleeplock(&b->lock, "buffer");
-    bcache.head.next->prev = b;
-    bcache.head.next = b;
+  int ht_index = 0; // evenly seperate the buffers on the hash table with ht_index
+  for (; num < NBUF; num++) {
+    b = &(bcache.buf[num]);
+    head = bcache.hash_table[ht_index];
+    b->next = head;
+    b->prev = head->prev;
+    head->prev->next = b;
+    head->prev = b;
+    bcache.hash_table[ht_index] = b;
+    b->ht_index = ht_index;
+    ht_index = (ht_index + 1) % SLOT_NUM;
   }
 }
 
@@ -58,31 +74,104 @@ static struct buf*
 bget(uint dev, uint blockno)
 {
   struct buf *b;
+  struct buf *head;
+  uint ht_index = blockno % SLOT_NUM;
+  uint block_ht_index = ht_index;
 
-  acquire(&bcache.lock);
+  acquire(&(bcache.ht_locks[ht_index]));
 
-  // Is the block already cached?
-  for(b = bcache.head.next; b != &bcache.head; b = b->next){
+  head = bcache.hash_table[ht_index];
+  b = head;
+  do {
+    if (b == 0)
+      break;
+
+    // Is the block already cached?
     if(b->dev == dev && b->blockno == blockno){
       b->refcnt++;
-      release(&bcache.lock);
+      release(&(bcache.ht_locks[ht_index]));
       acquiresleep(&b->lock);
       return b;
     }
-  }
+    b = b->next;
+  } while (b != head);
 
-  // Not cached; recycle an unused buffer.
-  for(b = bcache.head.prev; b != &bcache.head; b = b->prev){
+  // Not cached; recycle an unused buffer in this slot, then in other slots.
+  // b = head; // NOTICE we can comment it
+  do {
+    if (b == 0)
+      break;
+
     if(b->refcnt == 0) {
       b->dev = dev;
       b->blockno = blockno;
       b->valid = 0;
       b->refcnt = 1;
-      release(&bcache.lock);
+      release(&(bcache.ht_locks[ht_index]));
       acquiresleep(&b->lock);
       return b;
     }
-  }
+    b = b->next;
+  } while (b != head);
+
+  release(&(bcache.ht_locks[ht_index]));
+
+  // search for a buffer continously
+  do {
+    ht_index = (ht_index + 1) % SLOT_NUM;
+    acquire(&(bcache.ht_locks[ht_index]));
+
+    head = bcache.hash_table[ht_index];
+    b = head;
+
+    // search a buffer in this slot
+    do {
+      if (b == 0)
+        break;
+      
+      // check if it's an empty buffer
+      if(b->refcnt == 0) {
+        b->dev = dev;
+        b->blockno = blockno;
+        b->valid = 0;
+        b->refcnt = 1;
+
+        // we should put the buffer into correct slot
+        if (ht_index != block_ht_index) {
+
+          // take the buffer away from the original slot
+          if (b->next == b) 
+            bcache.hash_table[ht_index] = 0; // it's the last buffer in slot
+          else {
+            b->next->prev = b->prev;
+            b->prev->next = b->next;
+          }
+
+          // put the buffer into correct slot
+          acquire(&(bcache.ht_locks[block_ht_index]));
+          struct buf *tmp_head = bcache.hash_table[block_ht_index];
+          if (tmp_head == 0)
+            bcache.hash_table[block_ht_index] = b; // put the buffer directly, when the slot is empty
+          else {
+            b->next = tmp_head;
+            b->prev = tmp_head->prev;
+            tmp_head->prev->next = b;
+            tmp_head->prev = b;
+          }
+          b->ht_index = block_ht_index;
+          release(&(bcache.ht_locks[block_ht_index]));
+        }
+
+        release(&(bcache.ht_locks[ht_index]));
+        acquiresleep(&b->lock);
+        return b;
+      }
+      b = b->next;
+    } while (b != head);
+
+    release(&(bcache.ht_locks[ht_index]));
+  } while (ht_index != block_ht_index);
+
   panic("bget: no buffers");
 }
 
@@ -109,6 +198,30 @@ bwrite(struct buf *b)
   virtio_disk_rw(b->dev, b, 1);
 }
 
+void
+lock_buf_slot(struct buf *b)
+{
+  uint ht_index;
+  for (;;) {
+    ht_index = b->ht_index;
+    acquire(&(bcache.ht_locks[ht_index]));
+
+    // ensure b->ht_index is not modified
+    if (ht_index != b->ht_index) {
+      release(&(bcache.ht_locks[ht_index]));
+      continue;
+    }
+    break;
+  }
+}
+
+void
+unlock_buf_slot(struct buf *b)
+{
+  uint ht_index = b->ht_index;
+  release(&(bcache.ht_locks[ht_index]));
+}
+
 // Release a locked buffer.
 // Move to the head of the MRU list.
 void
@@ -119,33 +232,23 @@ brelse(struct buf *b)
 
   releasesleep(&b->lock);
 
-  acquire(&bcache.lock);
+  lock_buf_slot(b);
   b->refcnt--;
-  if (b->refcnt == 0) {
-    // no one is waiting for it.
-    b->next->prev = b->prev;
-    b->prev->next = b->next;
-    b->next = bcache.head.next;
-    b->prev = &bcache.head;
-    bcache.head.next->prev = b;
-    bcache.head.next = b;
-  }
-  
-  release(&bcache.lock);
+  unlock_buf_slot(b);
 }
 
 void
 bpin(struct buf *b) {
-  acquire(&bcache.lock);
+  lock_buf_slot(b);
   b->refcnt++;
-  release(&bcache.lock);
+  unlock_buf_slot(b);
 }
 
 void
 bunpin(struct buf *b) {
-  acquire(&bcache.lock);
+  lock_buf_slot(b);
   b->refcnt--;
-  release(&bcache.lock);
+  unlock_buf_slot(b);
 }
 
 
