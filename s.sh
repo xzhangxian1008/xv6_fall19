@@ -16,8 +16,10 @@ fi
 
 if [ $1 = $gdb ]
 then
-    rm fs.img
-    make fs.img
+    # rm fs.img
+    # rm mkfs/mkfs fs.img
+    # make mkfs/mkfs
+    # make fs.img
     make qemu-gdb
 elif [ $1 = $con ]
 then

@@ -188,13 +188,22 @@ writebig(char *s)
     exit(1);
   }
 
+  int max = MAXFILE;
+  printf("writebig >>>>>>\n");
   for(i = 0; i < MAXFILE; i++){
     ((int*)buf)[0] = i;
+    if (i % 1000 == 0) {
+      printf("writebig %d %d\n", i, max);
+    }
     if(write(fd, buf, BSIZE) != BSIZE){
       printf("%s: error: write big file failed\n", i);
       exit(1);
     }
+    if (i % 1000 == 0) {
+      printf("writebig --------\n");
+    }
   }
+  printf("writebig <<<<<<\n");
 
   close(fd);
 
@@ -206,7 +215,9 @@ writebig(char *s)
 
   n = 0;
   for(;;){
+    // printf("writebig 3\n");
     i = read(fd, buf, BSIZE);
+    // printf("writebig 4\n");
     if(i == 0){
       if(n == MAXFILE - 1){
         printf("%s: read only %d blocks from big", n);
@@ -2127,7 +2138,7 @@ main(int argc, char *argv[])
     {reparent2, "reparent2"},
     {pgbug, "pgbug" },
     {sbrkbugs, "sbrkbugs" },
-    // {badwrite, "badwrite" },
+    // {badwrite, "badwrite" }, // do not uncomment
     {badarg, "badarg" },
     {reparent, "reparent" },
     {twochildren, "twochildren"},
@@ -2155,7 +2166,7 @@ main(int argc, char *argv[])
     {stacktest, "stacktest"},
     {opentest, "opentest"},
     {writetest, "writetest"},
-    {writebig, "writebig"},
+    {writebig, "writebig"}, // I don't know why it becomes very very slow after symlink's changes
     {createtest, "createtest"},
     {openiputtest, "openiput"},
     {exitiputtest, "exitiput"},

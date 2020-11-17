@@ -48,8 +48,10 @@ struct file*
 filedup(struct file *f)
 {
   acquire(&ftable.lock);
-  if(f->ref < 1)
+  if(f->ref < 1) {
+    printf("f->ref: %d inode: %d\n", f->ref, f->ip->inum);
     panic("filedup");
+  }
   f->ref++;
   release(&ftable.lock);
   return f;

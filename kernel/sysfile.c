@@ -249,6 +249,7 @@ create(char *path, short type, short major, short minor)
 
   ilock(dp);
 
+  // check if the directory already has what we want to create
   if((ip = dirlookup(dp, name, 0)) != 0){
     iunlockput(dp);
     ilock(ip);
@@ -260,6 +261,11 @@ create(char *path, short type, short major, short minor)
 
   if((ip = ialloc(dp->dev, type)) == 0)
     panic("create: ialloc");
+
+  if (ip->inum == 36) {
+    int x = 0;
+    x += 1;
+  }
 
   ilock(ip);
   ip->major = major;
@@ -309,10 +315,61 @@ sys_open(void)
       return -1;
     }
     ilock(ip);
+
     if(ip->type == T_DIR && omode != O_RDONLY){
       iunlockput(ip);
       end_op(ROOTDEV);
       return -1;
+    }
+
+    // find the real file along the symbolic link
+    if (ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)) {
+      int max_depth = 10;
+      struct inode *loop_ip = ip;
+      char loop_path[MAXPATH];
+      int r;
+
+      // every loop checks if the loop_ip represents a file inode
+      // loop again if it's a symbolic link inode
+      for (; max_depth != 0; max_depth--) {
+        if (loop_ip->type == T_FILE) {
+          ip = loop_ip;
+          break;
+        } else if (loop_ip->type != T_SYMLINK) {
+          panic("sys_open: illegal inode type!");
+        }
+
+        // keep looking for the file along the symbolic link inode
+        if((f = filealloc()) == 0){
+          if(f)
+            fileclose(f);
+          end_op(ROOTDEV);
+          return -1;
+        }
+
+        f->type = FD_INODE; // NOTICE this may be wrong. T_DEVICE is possible?(I don't know)
+        f->ip = loop_ip;
+        f->off = 0;
+        f->readable = !O_WRONLY;
+        f->writable = O_WRONLY || O_RDWR;
+        
+        // NOTICE I'm not sure if the path is end with '/0'
+        if((r = readi(f->ip, 0, (uint64)loop_path, f->off, MAXPATH)) > 0) // read the next path
+          f->off += r;
+        
+        iunlock(loop_ip);
+        fileclose(f);
+        if ((loop_ip = namei(loop_path)) == 0) { // get the next path's inode
+          end_op(ROOTDEV);
+          return -1;
+        }
+        ilock(loop_ip);
+      }
+
+      if (max_depth == 0) {
+        end_op(ROOTDEV);
+        return -1;
+      }
     }
   }
 
@@ -483,3 +540,49 @@ sys_pipe(void)
   return 0;
 }
 
+// I'm not sure if this function is right. Test it alone if there are bugs!
+uint64
+sys_symlink(void)
+{
+  char target[MAXPATH];
+  char path[MAXPATH];
+  struct inode *ip;
+  struct file *f;
+
+  if(argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0)
+    return -1;
+
+  begin_op(ROOTDEV);
+
+  ip = create(path, T_SYMLINK, 0, 0);
+  if(ip == 0){
+    end_op(ROOTDEV);
+    return -1;
+  }
+
+  if((f = filealloc()) == 0){
+    if(f)
+      fileclose(f);
+    iunlockput(ip);
+    end_op(ROOTDEV);
+    return -1;
+  }
+
+  f->type = FD_INODE;
+  f->ip = ip;
+  f->off = 0;
+
+  // NOTICE I'm not sure about these two clauses
+  f->readable = !O_WRONLY;
+  f->writable = O_WRONLY || O_RDWR;
+
+  int r;
+  if ((r = writei(f->ip, 0, (uint64)target, f->off, strlen(target)+1)) > 0)
+    f->off += r;
+
+  iunlock(ip);
+  end_op(ROOTDEV);
+  fileclose(f); // close the file
+
+  return 0;
+}

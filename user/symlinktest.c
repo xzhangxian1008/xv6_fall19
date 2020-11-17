@@ -140,7 +140,7 @@ concur(void)
   int nchild = 2;
 
   printf("Start: test concurrent symlinks\n");
-    
+  
   fd = open("/testsymlink/z", O_CREATE | O_RDWR);
   if(fd < 0) {
     printf("FAILED: open failed");
@@ -160,11 +160,10 @@ concur(void)
       for(i = 0; i < 100; i++){
         x = x * 1103515245 + 12345;
         if((x % 3) == 0) {
-          symlink("/testsymlink/z", "/testsymlink/y");
+          symlink("/testsymlink/z", "/testsymlink/y"); 
           if (stat_slink("/testsymlink/y", &st) == 0) {
             m++;
             if(st.type != T_SYMLINK) {
-              printf("FAILED: not a symbolic link\n", st.type);
               exit(1);
             }
           }
