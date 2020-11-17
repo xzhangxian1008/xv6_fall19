@@ -251,12 +251,12 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 size, int do_free)
     }
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
+
     if(do_free){
       pa = PTE2PA(*pte);
       decr_ref((struct run*) pa);
       if (!is_ref_zero((struct run*) pa)) {
         // printf("free %p ", pa);
-        // add_unalloc();
         kfree((void*)pa);
       }
       // kfree((void*)pa);

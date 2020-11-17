@@ -192,12 +192,12 @@ main(int argc, char *argv[])
   // check that the first simpletest() freed the physical memory.
   simpletest();
 
-  // threetest();
-  // printf("!!!!!!!!!!\n");
-  // threetest(); // bug
-  // printf("##########\n");
-  // threetest();
-  // printf("$$$$$$$$\n");
+  threetest();
+  printf("!!!!!!!!!!\n");
+  threetest(); // bug
+  printf("##########\n");
+  threetest();
+  printf("$$$$$$$$\n");
 
   filetest();
 
