@@ -483,3 +483,41 @@ sys_pipe(void)
   return 0;
 }
 
+uint64
+mmap(void)
+{
+  void *addr;
+  uint length;
+  int prot;
+  int flags;
+  int fd;
+  int offset;
+
+  addr = 0; // addr is always 0 in this lab
+  offset = 0; // always see offset as 0
+
+  if (argint(1, &length) < 0)
+    return -1;
+  if (argint(2, &prot) < 0)
+    return -1;
+  if (argint(3, &flags) < 0)
+    return -1;
+  if (argint(4, &fd) < 0)
+    return -1;
+  
+
+}
+
+uint64
+munmap(void)
+{
+  void *addr;
+  uint length;
+
+  if (argaddr(0, &addr) < 0)
+    return -1;
+  if (argint(1, &length) < 0)
+    return -1;
+  
+
+}
