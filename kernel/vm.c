@@ -5,6 +5,9 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
+#include "fcntl.h"
 
 /*
  * the kernel's page table.
@@ -17,6 +20,17 @@ extern char trampoline[]; // trampoline.S
 
 void print(pagetable_t);
 
+static struct spinlock mmap_mem_lock;
+static int mmap_mem[MMAP_BLOCK_NUM]; // 0: free 1: allocated
+
+static struct spinlock mfiles_lock;
+static struct mmap_file mfiles[MMAP_FILE_NUM];
+
+struct {
+  struct spinlock lock;
+  struct mmap_file *head;
+} mmap_files;
+
 /*
  * create a direct-map page table for the kernel and
  * turn on paging. called early, in supervisor mode.
@@ -25,6 +39,9 @@ void print(pagetable_t);
 void
 kvminit()
 {
+  for (int i = 0; i < MMAP_BLOCK_NUM; i++)
+    mmap_mem[i] = 0;
+
   kernel_pagetable = (pagetable_t) kalloc();
   memset(kernel_pagetable, 0, PGSIZE);
 
@@ -189,10 +206,10 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 size, int do_free)
   for(;;){
     if((pte = walk(pagetable, a, 0)) == 0)
       panic("uvmunmap: walk");
-    if((*pte & PTE_V) == 0){
-      printf("va=%p pte=%p\n", a, *pte);
-      panic("uvmunmap: not mapped");
-    }
+    // if((*pte & PTE_V) == 0){
+    //   printf("va=%p pte=%p\n", a, *pte);
+    //   panic("uvmunmap: not mapped");
+    // }
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
     if(do_free){
@@ -450,4 +467,240 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+struct mmap_file*
+get_new_mmap_file()
+{
+  acquire(&mfiles_lock);
+  for (int i = 0; i < MMAP_FILE_NUM; i++)
+    if (mfiles[i].free == 0) {
+      mfiles[i].free = 1;
+      mfiles[i].index = i;
+      release(&mfiles_lock);
+      return &mfiles[i];
+    }
+  release(&mfiles_lock);
+  return 0;
+}
+
+void
+ret_mmap_file(struct mmap_file *mfile)
+{
+  acquire(&mfiles_lock);
+  mfiles[mfile->index].free = 0;
+  release(&mfiles_lock);
+}
+
+uint
+va2index(uint64 va)
+{
+  if (va < MMAPBASE || va >= PHYSTOP) {
+    printf("va %p\n", va);
+    panic("va2index: illegal va");
+  }
+  
+  va = va - MMAPBASE;
+  return (uint)(va / MMAP_BLOCK_SIZE);
+}
+
+// stupid way to find mmap_file
+struct mmap_file*
+index2file(uint index)
+{
+  acquire(&mmap_files.lock);
+  struct mmap_file *head = mmap_files.head;
+  struct mmap_file *mfile = head;
+  do {
+    if ((index >= mfile->start) && (index <= mfile->end)) {
+      release(&mmap_files.lock);
+      return mfile;
+    }
+    mfile = mfile->next;
+  } while (mfile != head);
+  release(&mmap_files.lock);
+  return 0;
+}
+
+uint64
+get_file_offset(struct mmap_file *mfile, uint64 va)
+{
+  uint index = va2index(va);
+  if (index < mfile->start || index > mfile->end)
+    return -1;
+  
+  return ((index-mfile->start) * MMAP_BLOCK_SIZE) + (va % MMAP_BLOCK_SIZE);
+}
+
+// allocate memory for mmap.
+void
+alloc_mmap(uint64 length, uint64 *start, uint64 *end)
+{
+  uint block_num;
+  uint i, j;
+  struct mmap_file *file;
+
+  if ((length % 4096) == 0)
+    block_num = length / 4096;
+  else
+    block_num = length / 4096 + 1;
+  
+  acquire(&mmap_mem_lock);
+  for (i = 0; i < MMAP_BLOCK_NUM; i++) {
+    if (mmap_mem[i] == 0) {
+      j = i;
+      while (j < MMAP_BLOCK_NUM && mmap_mem[j] != 1 && ((j-i+1) < block_num)) j++;
+
+      if (j >= MMAP_BLOCK_NUM) { // can't allocate enough space
+        *start = -1;
+        release(&mmap_mem_lock);
+        return;
+      }
+
+      if (mmap_mem[j] == 1) { // keep searching
+        i = j + 1;
+        continue;
+      }
+
+      // allocate the memory
+      if ((j-i+1) == block_num) {
+        *start = i;
+        *end = j;
+        for (uint k = i; k <= j; k++) {
+          mmap_mem[k] = 1;
+        }
+        release(&mmap_mem_lock);
+        return;
+      }
+      
+      release(&mmap_mem_lock);
+      panic("alloc_mmap: no reason to reach here");
+    }
+
+    file = index2file(i); // get the index's mapped file
+    if (file == 0) {
+      release(&mmap_mem_lock);
+      panic("alloc_mmap: file should exist");
+    }
+    i = file->end + 1; // jump over the allocated memory
+  }
+  panic("alloc_mmap: should not be here");
+}
+
+// TODO
+uint64
+mmap(uint64 length, int prot, int flags, int fd)
+{
+  uint64 start, end;
+  alloc_mmap(length, &start, &end);
+  if (start == -1) {
+    // printf("mmap here 1\n");
+    return -1;
+  }
+  
+  struct file *mf = myproc()->ofile[fd];
+  if (mf == 0) {
+    // TODO free the space allocated before (start, end)
+    // printf("mmap here 2\n");
+    return -1;
+  }
+  else {
+    filedup(mf);
+  }
+
+  struct mmap_file *mfile = get_new_mmap_file();
+  if (mfile == 0) {
+    // TODO free the space allocated before (start, end)
+    fileclose(mf);
+    printf("mmap here 3\n");
+    return -1;
+  }
+  
+  mfile->start = start;
+  mfile->end = end;
+  mfile->prot = prot;
+  mfile->flags = flags;
+  mfile->mapped_file = mf;
+
+  acquire(&mmap_files.lock);
+  if (mmap_files.head == 0) {
+    mmap_files.head = mfile;
+    mmap_files.head->next = mmap_files.head;
+    mmap_files.head->prev = mmap_files.head;
+  } else {
+    // insert to the tail
+    mfile->next = mmap_files.head;
+    mfile->prev = mmap_files.head->prev;
+    mmap_files.head->prev->next = mfile;
+    mmap_files.head->prev = mfile;
+  }
+  release(&mmap_files.lock);
+
+  return INDEX_2_ADDR(start);
+}
+
+// On success, it returns 0. 
+// On failure, it returns -1.
+// NOTICE I dont't know if we can unmap multi-fds.
+// NOTICE My implementation unmap only one fd so far
+int
+munmap(void *addr, uint64 length)
+{
+  // NOTICE maybe this length cross over several fds. Whatever, I don't care.
+  struct mmap_file *mfile = index2file(va2index((uint64)addr));
+  if (mfile == 0) {
+    printf("munmap: mfile 0\n"); // for debug
+    return -1;
+  }
+
+  uint64 start = mfile->start;
+  uint64 end = mfile->end;
+  pte_t pte;
+  struct proc *p = myproc();
+
+  if (mfile->flags & MAP_SHARED) {
+    // look for modified area to write back
+    for (int i = start; i < end; i++) {
+      if ((pte = walk(p->pagetable, INDEX_2_ADDR(i), 0)) == 0)
+        continue;
+      if (pte & PTE_D) { // NOTICE I'm not sure if xv6 will set PTE_D automatically
+        if (mfile_write_back(INDEX_2_ADDR(i), MMAP_BLOCK_SIZE, i*MMAP_BLOCK_SIZE, mfile->mapped_file) < 0)
+          panic("munmap: write back fail");
+      }
+    }
+    int length = mfile->length % MMAP_BLOCK_SIZE;
+    if (mfile_write_back(INDEX_2_ADDR(end-1), length, (end-1)*MMAP_BLOCK_SIZE, mfile->mapped_file) < 0)
+      panic("munmap: write end back fail");
+  }
+
+  fileclose(mfile->mapped_file);
+
+  // NOTICE I assume that every proc does not share physical memory in mmap files
+  uvmunmap(p->pagetable, INDEX_2_ADDR(mfile->start), mfile->length, 1);
+
+
+  acquire(&mfiles_lock);
+  mfile->free = 0;
+  mfile->start = -1;
+  mfile->end = -1;
+  mfile->length = -1;
+  mfile->flags = 0;
+  mfile->prot = 0;
+  mfile->mapped_file = 0;
+  mfile->prev = 0;
+  mfile->next = 0;
+  release(&mfiles_lock);
+  
+  acquire(&mmap_files.lock);
+  // TODO mmap_files
+  if (mfile->next == mfile->next)
+    mmap_files.head = 0;
+  else {
+    
+  }
+  release(&mmap_files.lock);
+
+  // TODO mmap_mem
+
+  return -1; // TODO
 }

@@ -10,7 +10,6 @@
 #include "defs.h"
 
 void freerange(void *pa_start, void *pa_end);
-void freemmap(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
@@ -24,36 +23,11 @@ struct {
   struct run *freelist;
 } kmem;
 
-struct {
-  struct spinlock lock;
-  struct run *freelist;
-} mmap_mem;
-
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
-  // freerange(end, (void*)PHYSTOP);
-  uint64 up = PHYSTOP - MMAPBASE;
-  freerange(end, (void*)up);
-  freemmap((void*)up, (void*)PHYSTOP);
-}
-
-void
-freemmap(void *pa_start, void *pa_end)
-{
-  char *pa;
-  struct run *r;
-  pa = (char*)PGROUNDUP((uint64)pa_start);
-  for(; pa + PGSIZE <= (char*)pa_end; pa += PGSIZE) {
-    memset(pa, 1, PGSIZE);
-    r = (struct run*)pa;
-
-    acquire(&mmap_mem.lock);
-    r->next = mmap_mem.freelist;
-    mmap_mem.freelist = r;
-    release(&mmap_mem.lock);
-  }
+  freerange(end, (void*)PHYSTOP);
 }
 
 void

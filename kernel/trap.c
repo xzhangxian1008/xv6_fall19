@@ -5,6 +5,8 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fs.h"
+#include "fcntl.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -71,11 +73,72 @@ usertrap(void)
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
+    uint64 va = r_stval();
+    uint64 scause = r_scause();
+    // allocate memory when page fault
+    while (va >= (uint64)MMAPBASE && va < (uint64)PHYSTOP) {
+      printf("usertrap here 1\n");
+      struct mmap_file *mfile = index2file(va2index(va));
+      if (mfile == 0) {
+        printf("usertrap(): not mapped va %p\n", va);
+        break;
+      }
+
+      // NOTICE we kill the process with unauthorized operation so far
+      if (scause == 13) { // check read
+        if (!(mfile->prot & PROT_READ)) {
+          printf("usertrap(): read permission denied\n");
+          break;
+        }
+      } else if (scause == 15) { // check write
+        if (!(mfile->prot & PROT_WRITE)) {
+          printf("usertrap(): write permission denied\n");
+          break;
+        }
+      } else {
+        printf("usertrap(): mmap memory space with illegal access\n");
+        break;
+      }
+
+      uint64 a = PGROUNDDOWN(va);
+      char *mem;
+      pagetable_t pagetable = p->pagetable;
+      mem = kalloc();
+      if(mem == 0){
+        printf("usertrap(): kalloc fails va: %p\n", a);
+        break;
+      }
+      memset(mem, 0, PGSIZE);
+      int flag = PTE_U;
+      if (mfile->prot & PROT_READ)
+        flag |= PTE_R;
+      if (mfile->prot & PROT_WRITE)
+        flag |= PTE_W;
+      
+      if(mappages(pagetable, a, PGSIZE, (uint64)mem, flag) != 0){
+        kfree(mem);
+        printf("usertrap(): mappages fails va: %p\n", a);
+        break;
+      }
+
+      // read data from file
+      uint64 f_offset = get_file_offset(mfile, a);
+      struct file *f = mfile->mapped_file;
+
+      if (file_trap_read(f, a, f_offset, PGSIZE) <= 0) {
+        printf("usertrap(): read fail\n");
+        break;
+      }
+
+      goto mmap;
+    }
+
     printf("usertrap(): unexpected scause %p (%s) pid=%d\n", r_scause(), scause_desc(r_scause()), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
   }
 
+mmap:
   if(p->killed)
     exit(-1);
 

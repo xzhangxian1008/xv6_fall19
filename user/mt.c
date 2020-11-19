@@ -16,6 +16,8 @@ int
 main(int argc, char *argv[])
 {
   mmap_test();
+  printf("mmaptest: stage test ok\n");
+  exit(0);
   fork_test();
   printf("mmaptest: all tests succeeded\n");
   exit(0);
@@ -115,6 +117,7 @@ mmap_test(void)
   _v1(p);
   if (munmap(p, PGSIZE*2) == -1)
     err("munmap (1)");
+  return; // NOTICE *** Stage Test ***
 
   // should be able to map file opened read-only with private writable
   // mapping

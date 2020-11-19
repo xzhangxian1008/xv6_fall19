@@ -33,6 +33,9 @@ void            fileinit(void);
 int             fileread(struct file*, uint64, int n);
 int             filestat(struct file*, uint64 addr);
 int             filewrite(struct file*, uint64, int n);
+int             file_trap_read(struct file*, uint64, uint64, uint64);
+int             mfile_write_back(void*, uint64, uint64, struct file*);
+void            mfile_close(struct file*, pagetable_t, uint64, uint64);
 
 // fs.c
 void            fsinit(int);
@@ -171,6 +174,11 @@ uint64          walkaddr(pagetable_t, uint64);
 int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
+uint            va2index(uint64 va);
+struct mmap_file* index2file(uint index);
+uint64          get_file_offset(struct mmap_file *mfile, uint64 va);
+uint64          mmap(uint64 length, int prot, int flags, int fd);
+int             munmap(void *addr, uint64 length);
 
 // plic.c
 void            plicinit(void);

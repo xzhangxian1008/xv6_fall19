@@ -134,6 +134,7 @@ bd_malloc(uint64 nbytes)
   }
   if(k >= nsizes) { // No free blocks?
     release(&lock);
+    printf("bd_malloc here 1\n");
     return 0;
   }
 

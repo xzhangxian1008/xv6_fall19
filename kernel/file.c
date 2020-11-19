@@ -180,3 +180,46 @@ filewrite(struct file *f, uint64 addr, int n)
   return ret;
 }
 
+int
+file_trap_read(struct file *f, uint64 addr, uint64 offset, uint64 size)
+{
+  begin_op(f->ip->dev);
+  ilock(f->ip);
+  int r = readi(f->ip, 1, addr, offset, size);
+  iunlock(f->ip);
+  end_op(f->ip->dev);
+  
+  return r;
+}
+
+int
+mfile_write_back(void *addr, uint64 n, uint64 offset, struct file *f)
+{
+  if (f->writable == 0)
+    return -1;
+
+  int r;
+  int max = ((MAXOPBLOCKS-1-1-2) / 2) * BSIZE;
+  int i = 0;
+
+  while(i < n){
+    int n1 = n - i;
+    if(n1 > max)
+      n1 = max;
+
+    begin_op(f->ip->dev);
+    ilock(f->ip);
+    if ((r = writei(f->ip, 1, addr + i, offset, n1)) > 0)
+      offset += r;
+    iunlock(f->ip);
+    end_op(f->ip->dev);
+
+    if (r <= 0)
+      break;
+    if(r != n1)
+      panic("mfile_write: short filewrite");
+    i += r;
+  }
+
+  return (i == n ? n : -1);
+}
