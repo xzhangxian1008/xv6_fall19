@@ -117,7 +117,6 @@ mmap_test(void)
   _v1(p);
   if (munmap(p, PGSIZE*2) == -1)
     err("munmap (1)");
-  return; // NOTICE *** Stage Test ***
 
   // should be able to map file opened read-only with private writable
   // mapping

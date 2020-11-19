@@ -77,7 +77,6 @@ usertrap(void)
     uint64 scause = r_scause();
     // allocate memory when page fault
     while (va >= (uint64)MMAPBASE && va < (uint64)PHYSTOP) {
-      printf("usertrap here 1\n");
       struct mmap_file *mfile = index2file(va2index(va));
       if (mfile == 0) {
         printf("usertrap(): not mapped va %p\n", va);

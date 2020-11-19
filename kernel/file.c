@@ -209,7 +209,7 @@ mfile_write_back(void *addr, uint64 n, uint64 offset, struct file *f)
 
     begin_op(f->ip->dev);
     ilock(f->ip);
-    if ((r = writei(f->ip, 1, addr + i, offset, n1)) > 0)
+    if ((r = writei(f->ip, 1, (uint64)(addr + i), offset, n1)) > 0)
       offset += r;
     iunlock(f->ip);
     end_op(f->ip->dev);

@@ -23,7 +23,7 @@ void print(pagetable_t);
 static struct spinlock mmap_mem_lock;
 static int mmap_mem[MMAP_BLOCK_NUM]; // 0: free 1: allocated
 
-static struct spinlock mfiles_lock;
+static struct spinlock mfiles_lock; // protect the mmap_file's free field
 static struct mmap_file mfiles[MMAP_FILE_NUM];
 
 struct {
@@ -204,18 +204,23 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 size, int do_free)
   a = PGROUNDDOWN(va);
   last = PGROUNDDOWN(va + size - 1);
   for(;;){
-    if((pte = walk(pagetable, a, 0)) == 0)
+    if((pte = walk(pagetable, a, 0)) == 0) {
+      if (a >= MMAPBASE && a < PHYSTOP)
+        goto unmap;
       panic("uvmunmap: walk");
-    // if((*pte & PTE_V) == 0){
-    //   printf("va=%p pte=%p\n", a, *pte);
-    //   panic("uvmunmap: not mapped");
-    // }
+    }
+    if((*pte & PTE_V) == 0){
+      // printf("va=%p pte=%p\n", a, *pte);
+      // panic("uvmunmap: not mapped");
+      goto unmap;
+    }
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
     if(do_free){
       pa = PTE2PA(*pte);
       kfree((void*)pa);
     }
+  unmap:
     *pte = 0;
     if(a == last)
       break;
@@ -597,6 +602,9 @@ mmap(uint64 length, int prot, int flags, int fd)
     // printf("mmap here 1\n");
     return -1;
   }
+
+  // NOTICE last work point
+  // TODO prot should not conflict with file's mode
   
   struct file *mf = myproc()->ofile[fd];
   if (mf == 0) {
@@ -615,9 +623,11 @@ mmap(uint64 length, int prot, int flags, int fd)
     printf("mmap here 3\n");
     return -1;
   }
+
   
   mfile->start = start;
   mfile->end = end;
+  mfile->length = length;
   mfile->prot = prot;
   mfile->flags = flags;
   mfile->mapped_file = mf;
@@ -655,7 +665,7 @@ munmap(void *addr, uint64 length)
 
   uint64 start = mfile->start;
   uint64 end = mfile->end;
-  pte_t pte;
+  pte_t *pte;
   struct proc *p = myproc();
 
   if (mfile->flags & MAP_SHARED) {
@@ -663,13 +673,13 @@ munmap(void *addr, uint64 length)
     for (int i = start; i < end; i++) {
       if ((pte = walk(p->pagetable, INDEX_2_ADDR(i), 0)) == 0)
         continue;
-      if (pte & PTE_D) { // NOTICE I'm not sure if xv6 will set PTE_D automatically
-        if (mfile_write_back(INDEX_2_ADDR(i), MMAP_BLOCK_SIZE, i*MMAP_BLOCK_SIZE, mfile->mapped_file) < 0)
+      if (PTE_FLAGS(*pte) & PTE_D) { // NOTICE I'm not sure if xv6 will set PTE_D automatically
+        if (mfile_write_back((void*)INDEX_2_ADDR(i), MMAP_BLOCK_SIZE, i*MMAP_BLOCK_SIZE, mfile->mapped_file) < 0)
           panic("munmap: write back fail");
       }
     }
     int length = mfile->length % MMAP_BLOCK_SIZE;
-    if (mfile_write_back(INDEX_2_ADDR(end-1), length, (end-1)*MMAP_BLOCK_SIZE, mfile->mapped_file) < 0)
+    if (mfile_write_back((void*)INDEX_2_ADDR(end-1), length, (end-1)*MMAP_BLOCK_SIZE, mfile->mapped_file) < 0)
       panic("munmap: write end back fail");
   }
 
@@ -677,30 +687,32 @@ munmap(void *addr, uint64 length)
 
   // NOTICE I assume that every proc does not share physical memory in mmap files
   uvmunmap(p->pagetable, INDEX_2_ADDR(mfile->start), mfile->length, 1);
+  
+  acquire(&mmap_files.lock);
+  if (mfile == mfile->next)
+    mmap_files.head = 0;
+  else {
+    mfile->next->prev = mfile->prev;
+    mfile->prev->next = mfile->next;
+    mfile->prev = 0;
+    mfile->next = 0;
+  }
+  release(&mmap_files.lock);
 
+  acquire(&mmap_mem_lock);
+  for (int i = start; i <= end; i++)
+    mmap_mem[i] = 0; // free
+  release(&mmap_mem_lock);
 
   acquire(&mfiles_lock);
   mfile->free = 0;
+  release(&mfiles_lock);
   mfile->start = -1;
   mfile->end = -1;
   mfile->length = -1;
   mfile->flags = 0;
   mfile->prot = 0;
   mfile->mapped_file = 0;
-  mfile->prev = 0;
-  mfile->next = 0;
-  release(&mfiles_lock);
-  
-  acquire(&mmap_files.lock);
-  // TODO mmap_files
-  if (mfile->next == mfile->next)
-    mmap_files.head = 0;
-  else {
-    
-  }
-  release(&mmap_files.lock);
 
-  // TODO mmap_mem
-
-  return -1; // TODO
+  return 0; // TODO
 }
