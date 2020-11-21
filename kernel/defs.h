@@ -36,6 +36,7 @@ int             filewrite(struct file*, uint64, int n);
 int             file_trap_read(struct file*, uint64, uint64, uint64);
 int             mfile_write_back(void*, uint64, uint64, struct file*);
 void            mfile_close(struct file*, pagetable_t, uint64, uint64);
+int             check_valid(struct file*, int);
 
 // fs.c
 void            fsinit(int);

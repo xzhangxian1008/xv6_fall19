@@ -12,6 +12,7 @@
 #include "file.h"
 #include "stat.h"
 #include "proc.h"
+#include "fcntl.h"
 
 struct devsw devsw[NDEV];
 struct {
@@ -222,4 +223,16 @@ mfile_write_back(void *addr, uint64 n, uint64 offset, struct file *f)
   }
 
   return (i == n ? n : -1);
+}
+
+int
+check_valid(struct file *f, int prot)
+{
+  if ((f->readable == 0) && (prot & PROT_READ))
+    return 0;
+  
+  if((f->writable == 0) && (prot & PROT_WRITE))
+    return 0;
+  
+  return 1;
 }

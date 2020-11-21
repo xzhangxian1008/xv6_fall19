@@ -16,8 +16,6 @@ int
 main(int argc, char *argv[])
 {
   mmap_test();
-  printf("mmaptest: stage test ok\n");
-  exit(0);
   fork_test();
   printf("mmaptest: all tests succeeded\n");
   exit(0);
@@ -113,23 +111,23 @@ mmap_test(void)
   //
   char *p = mmap(0, PGSIZE*2, PROT_READ, MAP_PRIVATE, fd, 0);
   if (p == MAP_FAILED)
-    err("mmap (1)");
+    err("mmap (1.1)");
   _v1(p);
   if (munmap(p, PGSIZE*2) == -1)
-    err("munmap (1)");
+    err("munmap (1.2)");
 
   // should be able to map file opened read-only with private writable
   // mapping
   p = mmap(0, PGSIZE*2, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
   if (p == MAP_FAILED)
-    err("mmap (2)");
+    err("mmap (2.1)");
   if (close(fd) == -1)
     err("close");
   _v1(p);
   for (i = 0; i < PGSIZE*2; i++)
     p[i] = 'Z';
   if (munmap(p, PGSIZE*2) == -1)
-    err("munmap (2)");
+    err("munmap (2.2)");
 
   // check that mmap doesn't allow read/write mapping of a
   // file opened read-only.
@@ -147,7 +145,7 @@ mmap_test(void)
     err("open");
   p = mmap(0, PGSIZE*3, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
   if (p == MAP_FAILED)
-    err("mmap (3)");
+    err("mmap (3.1)");
   if (close(fd) == -1)
     err("close");
 
@@ -160,7 +158,7 @@ mmap_test(void)
 
   // unmap just the first two of three pages of mapped memory.
   if (munmap(p, PGSIZE*2) == -1)
-    err("munmap (3)");
+    err("munmap (3.2)");
 
   // check that the writes to the mapped memory were
   // written to the file.
@@ -170,12 +168,13 @@ mmap_test(void)
     char b;
     if (read(fd, &b, 1) != 1)
       err("read (1)");
-    if (b != 'Z')
+    if (b != 'Z') {
+      printf("b %c i %d\n", b, i);
       err("file does not contain modifications");
+    }
   }
   if (close(fd) == -1)
     err("close");
-
   // unmap the rest of the mapped memory.
   if (munmap(p+PGSIZE*2, PGSIZE) == -1)
     err("munmap (4)");
@@ -206,9 +205,9 @@ mmap_test(void)
   unlink("mmap2");
 
   if(memcmp(p1, "12345", 5) != 0)
-    err("mmap1 mismatch");
+    err("mmap1 mismatch 1");
   if(memcmp(p2, "67890", 5) != 0)
-    err("mmap2 mismatch");
+    err("mmap2 mismatch 2");
 
   munmap(p1, PGSIZE);
   if(memcmp(p2, "67890", 5) != 0)

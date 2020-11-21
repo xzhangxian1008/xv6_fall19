@@ -489,14 +489,6 @@ get_new_mmap_file()
   return 0;
 }
 
-void
-ret_mmap_file(struct mmap_file *mfile)
-{
-  acquire(&mfiles_lock);
-  mfiles[mfile->index].free = 0;
-  release(&mfiles_lock);
-}
-
 uint
 va2index(uint64 va)
 {
@@ -516,6 +508,10 @@ index2file(uint index)
   acquire(&mmap_files.lock);
   struct mmap_file *head = mmap_files.head;
   struct mmap_file *mfile = head;
+  if (mfile == 0) {
+    release(&mmap_files.lock);
+    return 0;
+  }
   do {
     if ((index >= mfile->start) && (index <= mfile->end)) {
       release(&mmap_files.lock);
@@ -592,38 +588,50 @@ alloc_mmap(uint64 length, uint64 *start, uint64 *end)
   panic("alloc_mmap: should not be here");
 }
 
-// TODO
+void
+dealloc_mmap(uint64 start, uint64 end)
+{
+  if (start < 0 || end >= MMAP_BLOCK_NUM)
+    panic("dealloc_mmap: invalid range");
+
+  acquire(&mmap_mem_lock);
+  for (int i = start; i <= end; i++) {
+    mmap_mem[i] = 0;
+  }
+  release(&mmap_mem_lock);
+}
+
 uint64
 mmap(uint64 length, int prot, int flags, int fd)
 {
   uint64 start, end;
   alloc_mmap(length, &start, &end);
   if (start == -1) {
-    // printf("mmap here 1\n");
     return -1;
   }
-
-  // NOTICE last work point
-  // TODO prot should not conflict with file's mode
   
   struct file *mf = myproc()->ofile[fd];
   if (mf == 0) {
-    // TODO free the space allocated before (start, end)
-    // printf("mmap here 2\n");
+    dealloc_mmap(start, end);
     return -1;
   }
   else {
     filedup(mf);
   }
 
-  struct mmap_file *mfile = get_new_mmap_file();
-  if (mfile == 0) {
-    // TODO free the space allocated before (start, end)
+  // prot should not conflict with file's mode
+  if ((flags & MAP_SHARED) && !check_valid(mf, prot)) {
+    dealloc_mmap(start, end);
     fileclose(mf);
-    printf("mmap here 3\n");
     return -1;
   }
-
+    
+  struct mmap_file *mfile = get_new_mmap_file();
+  if (mfile == 0) {
+    dealloc_mmap(start, end);
+    fileclose(mf);
+    return -1;
+  }
   
   mfile->start = start;
   mfile->end = end;
@@ -663,46 +671,89 @@ munmap(void *addr, uint64 length)
     return -1;
   }
 
-  uint64 start = mfile->start;
-  uint64 end = mfile->end;
+  uint64 start = INDEX_2_ADDR(mfile->start);
+  uint64 end = INDEX_2_ADDR(mfile->end) + MMAP_BLOCK_SIZE - 1;
+
+  // NOTICE address range's judgement may have bug
+  if (start < (uint64)addr && end > ((uint64)addr + length - 1)) { // do not punch a hole
+    start = mfile->start;
+    end = mfile->end;
+  } else if (start >= (uint64)addr && end <= ((uint64)addr + length - 1)) {
+    start = mfile->start;
+    end = mfile->end;
+  } else if (start >= (uint64)addr && end > ((uint64)addr + length - 1)) {
+    start = mfile->start;
+    end = ADDR_2_INDEX(((uint64)addr + length - 1));
+  } else if (start < (uint64)addr && end <= ((uint64)addr + length - 1)) {
+    start = ADDR_2_INDEX((uint64)addr);
+    end = mfile->end;
+  } else {
+    printf("munmap: strange range\n"); // for debug
+  }
+
   pte_t *pte;
   struct proc *p = myproc();
+  if (start == mfile->start && end == mfile->end)
+    length = mfile->length;
+  else {
+    length = (end - start + 1) * MMAP_BLOCK_SIZE;
+  }
 
   if (mfile->flags & MAP_SHARED) {
+    int len = MMAP_BLOCK_SIZE;
+
     // look for modified area to write back
-    for (int i = start; i < end; i++) {
+    for (int i = start; i <= end; i++) {
       if ((pte = walk(p->pagetable, INDEX_2_ADDR(i), 0)) == 0)
         continue;
       if (PTE_FLAGS(*pte) & PTE_D) { // NOTICE I'm not sure if xv6 will set PTE_D automatically
-        if (mfile_write_back((void*)INDEX_2_ADDR(i), MMAP_BLOCK_SIZE, i*MMAP_BLOCK_SIZE, mfile->mapped_file) < 0)
+        len = MMAP_BLOCK_SIZE;
+        if (i == end && (length % MMAP_BLOCK_SIZE != 0)) {
+          len = length % MMAP_BLOCK_SIZE;
+        }
+        if (mfile_write_back((void*)INDEX_2_ADDR(i), len, i*MMAP_BLOCK_SIZE, mfile->mapped_file) < 0)
           panic("munmap: write back fail");
       }
     }
-    int length = mfile->length % MMAP_BLOCK_SIZE;
-    if (mfile_write_back((void*)INDEX_2_ADDR(end-1), length, (end-1)*MMAP_BLOCK_SIZE, mfile->mapped_file) < 0)
-      panic("munmap: write end back fail");
+  } else if (!(mfile->flags & MAP_PRIVATE)) {
+    panic("munmap: invalid flags");
   }
 
-  fileclose(mfile->mapped_file);
+  if (start == mfile->start && end == mfile->end)
+    fileclose(mfile->mapped_file);
 
   // NOTICE I assume that every proc does not share physical memory in mmap files
-  uvmunmap(p->pagetable, INDEX_2_ADDR(mfile->start), mfile->length, 1);
-  
-  acquire(&mmap_files.lock);
-  if (mfile == mfile->next)
-    mmap_files.head = 0;
-  else {
-    mfile->next->prev = mfile->prev;
-    mfile->prev->next = mfile->next;
-    mfile->prev = 0;
-    mfile->next = 0;
-  }
-  release(&mmap_files.lock);
+  uvmunmap(p->pagetable, INDEX_2_ADDR(start), length, 1);
 
   acquire(&mmap_mem_lock);
   for (int i = start; i <= end; i++)
     mmap_mem[i] = 0; // free
   release(&mmap_mem_lock);
+
+  mfile->length -= length;
+  if (start != mfile->start) {
+    mfile->end = start - 1;
+    return 0;
+  } else if (end != mfile->end) {
+    mfile->start = end + 1;
+    return 0;
+  }
+  
+  acquire(&mmap_files.lock);
+  if (mfile == mfile->next)
+    mmap_files.head = 0;
+  else {
+    if (mfile == mmap_files.head) {
+      mmap_files.head = mfile->next;
+    }
+    mfile->next->prev = mfile->prev;
+    mfile->prev->next = mfile->next;
+  }
+  mfile->prev = 0;
+  mfile->next = 0;
+  struct mmap_file *head = mmap_files.head;
+  struct mmap_file *mf = head;
+  release(&mmap_files.lock);
 
   acquire(&mfiles_lock);
   mfile->free = 0;
@@ -714,5 +765,5 @@ munmap(void *addr, uint64 length)
   mfile->prot = 0;
   mfile->mapped_file = 0;
 
-  return 0; // TODO
+  return 0;
 }
