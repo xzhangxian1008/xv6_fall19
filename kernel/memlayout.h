@@ -66,10 +66,3 @@
 //   TRAPFRAME (p->tf, used by the trampoline)
 //   TRAMPOLINE (the same page as in the kernel)
 #define TRAPFRAME (TRAMPOLINE - PGSIZE)
-
-#define MMAPBASE 0x60000000L
-#define MMAP_BLOCK_SIZE 4096
-#define MMAP_BLOCK_NUM ((PHYSTOP - MMAPBASE) / MMAP_BLOCK_SIZE)
-
-#define INDEX_2_ADDR(i) ((uint64)i * MMAP_BLOCK_SIZE + MMAPBASE)
-#define ADDR_2_INDEX(i) (((uint64)i - MMAPBASE) / MMAP_BLOCK_SIZE)

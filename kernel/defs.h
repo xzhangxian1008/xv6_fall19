@@ -180,6 +180,7 @@ struct mmap_file* index2file(uint index);
 uint64          get_file_offset(struct mmap_file *mfile, uint64 va);
 uint64          mmap(uint64 length, int prot, int flags, int fd);
 int             munmap(void *addr, uint64 length);
+void            clear_mmap(struct proc*);
 
 // plic.c
 void            plicinit(void);

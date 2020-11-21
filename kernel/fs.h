@@ -57,21 +57,3 @@ struct dirent {
   ushort inum;
   char name[DIRSIZ];
 };
-
-// I don't know why bd_allocate always fails.
-// So, pre-define some mmap_files in this stupid way.
-#define MMAP_FILE_NUM 30
-
-struct mmap_file {
-  int free; // 0: free  1: allocated
-  uint index;
-  
-  uint64 start; // refer to the mmap_mem's index
-  uint64 end;
-  uint64 length;
-  int prot;
-  int flags;
-  struct file *mapped_file;
-  struct mmap_file *prev;
-  struct mmap_file *next;
-};

@@ -123,6 +123,9 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  for (int i = 0; i < MMAP_BLOCK_NUM; i++)
+    p->mmap_mem[i] = 0;
+
   return p;
 }
 
@@ -241,6 +244,22 @@ growproc(int n)
   return 0;
 }
 
+void
+copy_mmap_file(struct mmap_file *dst, struct mmap_file *src)
+{
+  dst->free = src->free;
+  dst->index = src->index;
+  dst->start = src->start;
+  dst->end = src->end;
+  dst->length = src->length;
+  dst->prot = src->prot;
+  dst->flags = src->flags;
+  dst->mapped_file = src->mapped_file;
+  dst->mapped_file->ref++; // add ref
+  dst->next = 0;
+  dst->prev = 0;
+}
+
 // Create a new process, copying the parent.
 // Sets up child kernel stack to return as if from fork() system call.
 int
@@ -261,6 +280,38 @@ fork(void)
     release(&np->lock);
     return -1;
   }
+
+  // copy for mmap, there is no need to lock the child
+  for (int i = 0; i < MMAP_BLOCK_NUM; i++)
+    np->mmap_mem[i] = p->mmap_mem[i];
+  
+  struct mmap_file *p_head = p->mmap_files.head;
+  struct mmap_file *p_mf = p_head;
+  struct mmap_file *np_mf;
+  struct mmap_file *tmp;
+  if (p_head != 0) {
+    tmp = &(np->mfiles[p_head->index]);
+    copy_mmap_file(tmp, p_head);
+    np->mmap_files.head = tmp;
+    tmp->next = tmp;
+    tmp->prev = tmp;
+
+    p_mf = p_mf->next;
+    np_mf = np->mmap_files.head;
+    while (p_mf != p_head) {
+      tmp = &(np->mfiles[p_mf->index]);
+      copy_mmap_file(tmp, p_mf);
+      tmp->prev = np_mf;
+      tmp->next = np_mf->next;
+      np_mf->next->prev = tmp;
+      np_mf->next = tmp;
+
+      np_mf = np_mf->next;
+      p_mf = p_mf->next;
+    }
+  } else
+    np->mmap_files.head = 0;
+  
   np->sz = p->sz;
 
   np->parent = p;
@@ -333,6 +384,8 @@ exit(int status)
       p->ofile[fd] = 0;
     }
   }
+
+  clear_mmap(p);
 
   begin_op(ROOTDEV);
   iput(p->cwd);

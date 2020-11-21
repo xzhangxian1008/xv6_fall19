@@ -20,16 +20,16 @@ extern char trampoline[]; // trampoline.S
 
 void print(pagetable_t);
 
-static struct spinlock mmap_mem_lock;
-static int mmap_mem[MMAP_BLOCK_NUM]; // 0: free 1: allocated
+// static struct spinlock mmap_mem_lock;
+// static int mmap_mem[MMAP_BLOCK_NUM]; // 0: free 1: allocated
 
-static struct spinlock mfiles_lock; // protect the mmap_file's free field
-static struct mmap_file mfiles[MMAP_FILE_NUM];
+// static struct spinlock mfiles_lock; // protect the mmap_file's free field
+// static struct mmap_file mfiles[MMAP_FILE_NUM];
 
-struct {
-  struct spinlock lock;
-  struct mmap_file *head;
-} mmap_files;
+// struct {
+//   struct spinlock lock;
+//   struct mmap_file *head;
+// } mmap_files;
 
 /*
  * create a direct-map page table for the kernel and
@@ -39,9 +39,6 @@ struct {
 void
 kvminit()
 {
-  for (int i = 0; i < MMAP_BLOCK_NUM; i++)
-    mmap_mem[i] = 0;
-
   kernel_pagetable = (pagetable_t) kalloc();
   memset(kernel_pagetable, 0, PGSIZE);
 
@@ -477,15 +474,16 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 struct mmap_file*
 get_new_mmap_file()
 {
-  acquire(&mfiles_lock);
+  struct proc *p = myproc();
+  acquire(&(p->mfiles_lock));
   for (int i = 0; i < MMAP_FILE_NUM; i++)
-    if (mfiles[i].free == 0) {
-      mfiles[i].free = 1;
-      mfiles[i].index = i;
-      release(&mfiles_lock);
-      return &mfiles[i];
+    if (p->mfiles[i].free == 0) {
+      p->mfiles[i].free = 1;
+      p->mfiles[i].index = i;
+      release(&(p->mfiles_lock));
+      return &(p->mfiles[i]);
     }
-  release(&mfiles_lock);
+  release(&(p->mfiles_lock));
   return 0;
 }
 
@@ -505,21 +503,22 @@ va2index(uint64 va)
 struct mmap_file*
 index2file(uint index)
 {
-  acquire(&mmap_files.lock);
-  struct mmap_file *head = mmap_files.head;
+  struct proc *p = myproc();
+  acquire(&(p->mmap_files.lock));
+  struct mmap_file *head = p->mmap_files.head;
   struct mmap_file *mfile = head;
   if (mfile == 0) {
-    release(&mmap_files.lock);
+    release(&(p->mmap_files.lock));
     return 0;
   }
   do {
     if ((index >= mfile->start) && (index <= mfile->end)) {
-      release(&mmap_files.lock);
+      release(&(p->mmap_files.lock));
       return mfile;
     }
     mfile = mfile->next;
   } while (mfile != head);
-  release(&mmap_files.lock);
+  release(&(p->mmap_files.lock));
   return 0;
 }
 
@@ -540,25 +539,26 @@ alloc_mmap(uint64 length, uint64 *start, uint64 *end)
   uint block_num;
   uint i, j;
   struct mmap_file *file;
+  struct proc *p = myproc();
 
   if ((length % 4096) == 0)
     block_num = length / 4096;
   else
     block_num = length / 4096 + 1;
   
-  acquire(&mmap_mem_lock);
+  acquire(&(p->mmap_mem_lock));
   for (i = 0; i < MMAP_BLOCK_NUM; i++) {
-    if (mmap_mem[i] == 0) {
+    if (p->mmap_mem[i] == 0) {
       j = i;
-      while (j < MMAP_BLOCK_NUM && mmap_mem[j] != 1 && ((j-i+1) < block_num)) j++;
+      while (j < MMAP_BLOCK_NUM && p->mmap_mem[j] != 1 && ((j-i+1) < block_num)) j++;
 
       if (j >= MMAP_BLOCK_NUM) { // can't allocate enough space
         *start = -1;
-        release(&mmap_mem_lock);
+        release(&(p->mmap_mem_lock));
         return;
       }
 
-      if (mmap_mem[j] == 1) { // keep searching
+      if (p->mmap_mem[j] == 1) { // keep searching
         i = j + 1;
         continue;
       }
@@ -568,19 +568,19 @@ alloc_mmap(uint64 length, uint64 *start, uint64 *end)
         *start = i;
         *end = j;
         for (uint k = i; k <= j; k++) {
-          mmap_mem[k] = 1;
+          p->mmap_mem[k] = 1;
         }
-        release(&mmap_mem_lock);
+        release(&(p->mmap_mem_lock));
         return;
       }
       
-      release(&mmap_mem_lock);
+      release(&(p->mmap_mem_lock));
       panic("alloc_mmap: no reason to reach here");
     }
 
     file = index2file(i); // get the index's mapped file
     if (file == 0) {
-      release(&mmap_mem_lock);
+      release(&(p->mmap_mem_lock));
       panic("alloc_mmap: file should exist");
     }
     i = file->end + 1; // jump over the allocated memory
@@ -594,11 +594,12 @@ dealloc_mmap(uint64 start, uint64 end)
   if (start < 0 || end >= MMAP_BLOCK_NUM)
     panic("dealloc_mmap: invalid range");
 
-  acquire(&mmap_mem_lock);
+  struct proc *p = myproc();
+  acquire(&(p->mmap_mem_lock));
   for (int i = start; i <= end; i++) {
-    mmap_mem[i] = 0;
+    p->mmap_mem[i] = 0;
   }
-  release(&mmap_mem_lock);
+  release(&(p->mmap_mem_lock));
 }
 
 uint64
@@ -610,7 +611,8 @@ mmap(uint64 length, int prot, int flags, int fd)
     return -1;
   }
   
-  struct file *mf = myproc()->ofile[fd];
+  struct proc *p = myproc();
+  struct file *mf = p->ofile[fd];
   if (mf == 0) {
     dealloc_mmap(start, end);
     return -1;
@@ -640,19 +642,19 @@ mmap(uint64 length, int prot, int flags, int fd)
   mfile->flags = flags;
   mfile->mapped_file = mf;
 
-  acquire(&mmap_files.lock);
-  if (mmap_files.head == 0) {
-    mmap_files.head = mfile;
-    mmap_files.head->next = mmap_files.head;
-    mmap_files.head->prev = mmap_files.head;
+  acquire(&(p->mmap_files.lock));
+  if (p->mmap_files.head == 0) {
+    p->mmap_files.head = mfile;
+    p->mmap_files.head->next = p->mmap_files.head;
+    p->mmap_files.head->prev = p->mmap_files.head;
   } else {
     // insert to the tail
-    mfile->next = mmap_files.head;
-    mfile->prev = mmap_files.head->prev;
-    mmap_files.head->prev->next = mfile;
-    mmap_files.head->prev = mfile;
+    mfile->next = p->mmap_files.head;
+    mfile->prev = p->mmap_files.head->prev;
+    p->mmap_files.head->prev->next = mfile;
+    p->mmap_files.head->prev = mfile;
   }
-  release(&mmap_files.lock);
+  release(&(p->mmap_files.lock));
 
   return INDEX_2_ADDR(start);
 }
@@ -725,10 +727,10 @@ munmap(void *addr, uint64 length)
   // NOTICE I assume that every proc does not share physical memory in mmap files
   uvmunmap(p->pagetable, INDEX_2_ADDR(start), length, 1);
 
-  acquire(&mmap_mem_lock);
+  acquire(&(p->mmap_mem_lock));
   for (int i = start; i <= end; i++)
-    mmap_mem[i] = 0; // free
-  release(&mmap_mem_lock);
+    p->mmap_mem[i] = 0; // free
+  release(&(p->mmap_mem_lock));
 
   mfile->length -= length;
   if (start != mfile->start) {
@@ -739,25 +741,23 @@ munmap(void *addr, uint64 length)
     return 0;
   }
   
-  acquire(&mmap_files.lock);
+  acquire(&(p->mmap_files.lock));
   if (mfile == mfile->next)
-    mmap_files.head = 0;
+    p->mmap_files.head = 0;
   else {
-    if (mfile == mmap_files.head) {
-      mmap_files.head = mfile->next;
+    if (mfile == p->mmap_files.head) {
+      p->mmap_files.head = mfile->next;
     }
     mfile->next->prev = mfile->prev;
     mfile->prev->next = mfile->next;
   }
   mfile->prev = 0;
   mfile->next = 0;
-  struct mmap_file *head = mmap_files.head;
-  struct mmap_file *mf = head;
-  release(&mmap_files.lock);
+  release(&(p->mmap_files.lock));
 
-  acquire(&mfiles_lock);
+  acquire(&(p->mfiles_lock));
   mfile->free = 0;
-  release(&mfiles_lock);
+  release(&(p->mfiles_lock));
   mfile->start = -1;
   mfile->end = -1;
   mfile->length = -1;
@@ -766,4 +766,17 @@ munmap(void *addr, uint64 length)
   mfile->mapped_file = 0;
 
   return 0;
+}
+
+// On success, it returns 0. 
+// On failure, it returns -1.
+void
+clear_mmap(struct proc *p) {
+  uint64 start;
+  uint64 length;
+  while (p->mmap_files.head != 0) {
+    start = INDEX_2_ADDR(p->mmap_files.head->start);
+    length = INDEX_2_ADDR(p->mmap_files.head->end) + MMAP_BLOCK_SIZE - start;
+    munmap((void*)start, length);
+  }
 }

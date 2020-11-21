@@ -82,6 +82,33 @@ struct trapframe {
 
 enum procstate { UNUSED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
+// I don't know why bd_allocate always fails.
+// So, pre-define some mmap_files in this stupid way.
+#define MMAP_FILE_NUM 30
+
+#define MMAPBASE 0x60000000L
+#define MMAP_BLOCK_SIZE 4096
+
+// it is sad that we can not include the .h for PHYSTOP
+#define MMAP_BLOCK_NUM (((0x80000000L  + 128*1024*1024) - MMAPBASE) / MMAP_BLOCK_SIZE)
+
+#define INDEX_2_ADDR(i) ((uint64)i * MMAP_BLOCK_SIZE + MMAPBASE)
+#define ADDR_2_INDEX(i) (((uint64)i - MMAPBASE) / MMAP_BLOCK_SIZE)
+
+struct mmap_file {
+  int free; // 0: free  1: allocated
+  uint index;
+  
+  uint64 start; // refer to the mmap_mem's index
+  uint64 end;
+  uint64 length;
+  int prot;
+  int flags;
+  struct file *mapped_file;
+  struct mmap_file *prev;
+  struct mmap_file *next;
+};
+
 // Per-process state
 struct proc {
   struct spinlock lock;
@@ -103,4 +130,15 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  struct spinlock mmap_mem_lock;
+  int mmap_mem[MMAP_BLOCK_NUM]; // 0: free 1: allocated
+
+  struct spinlock mfiles_lock; // protect the mmap_file's free field
+  struct mmap_file mfiles[MMAP_FILE_NUM];
+
+  struct {
+    struct spinlock lock;
+    struct mmap_file *head;
+  } mmap_files;
 };
