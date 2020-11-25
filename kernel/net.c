@@ -17,6 +17,7 @@ static uint8 broadcast_mac[ETHADDR_LEN] = { 0xFF, 0XFF, 0XFF, 0XFF, 0XFF, 0XFF }
 
 // Strips data from the start of the buffer and returns a pointer to it.
 // Returns 0 if less than the full requested length is available.
+// strip the head and the head points to the next head or data(if there is no head)
 char *
 mbufpull(struct mbuf *m, unsigned int len)
 {
@@ -364,6 +365,7 @@ void net_rx(struct mbuf *m)
     return;
   }
 
+  // get the upper layer's type
   type = ntohs(ethhdr->type);
   if (type == ETHTYPE_IP)
     net_rx_ip(m);

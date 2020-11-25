@@ -24,7 +24,9 @@ struct sock {
 };
 
 static struct spinlock lock;
-static struct sock *sockets;
+static struct sock *sockets; // a list of socket
+
+#define min(a, b) ((a) < (b) ? (a) : (b))
 
 void
 sockinit(void)
@@ -87,6 +89,55 @@ bad:
 // and writing for network sockets.
 //
 
+void
+sockclose(struct sock *s) // NOTIC I'm not sure he parameter
+{
+  // TODO
+}
+
+int
+sockread(struct sock *s, uint64 addr, int n)
+{
+  // TODO
+  while (1) {
+    acquire(&s->lock);
+    if (!mbufq_empty(&s->rxq))
+      break;
+    release(&s->lock);
+
+    sleep(s, 0);
+  }
+  
+  struct mbuf *m;
+  uint num;
+  uint sum = 0;
+  pagetable_t pagetable = myproc()->pagetable;
+
+  // NOTICE how about the left data if we can't read all of the data in a mbuf?
+  // NOTICE we discard them in the current implementation
+  while (n > 0) {
+    m = mbufq_pophead(&s->rxq);
+    num = min(m->len, n);
+    if (copyout(pagetable, addr, m->head, num)) {
+      printf("sockread: copyout error!\n");
+      return sum;
+    }
+
+    sum += num;
+    addr += num;
+    n -= num;
+    mbuffree(m);
+  }
+
+  return sum;
+}
+
+int
+sockwrite(struct sock *s, uint64 addr, int n)
+{
+  // TODO
+}
+
 // called by protocol handler layer to deliver UDP packets
 void
 sockrecvudp(struct mbuf *m, uint32 raddr, uint16 lport, uint16 rport)
@@ -98,5 +149,6 @@ sockrecvudp(struct mbuf *m, uint32 raddr, uint16 lport, uint16 rport)
   // any sleeping reader. Free the mbuf if there are no sockets
   // registered to handle it.
   //
+  // TODO
   mbuffree(m);
 }

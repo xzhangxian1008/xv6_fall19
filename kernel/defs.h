@@ -66,6 +66,9 @@ int             writei(struct inode*, int, uint64, uint, uint);
 // net.c
 void            net_rx(struct mbuf*);
 void            net_tx_udp(struct mbuf*, uint32, uint16, uint16);
+void            sockclose(struct sock*);
+int             sockread(struct sock*, uint64, int);
+int             sockwrite(struct sock*, uint64, int);
 
 // sysnet.c
 void            sockinit(void);

@@ -102,7 +102,27 @@ e1000_transmit(struct mbuf *m)
   // the TX descriptor ring so that the e1000 sends it. Stash
   // a pointer so that it can be freed after sending.
   //
-  return -1;
+
+  uint current = regs[E1000_TDT];
+  if (current >= TX_RING_SIZE) {
+    // NOTICE I don't know how to deal with the overflow so far
+    panic("e1000_transmit: overflow!");
+  }
+
+  if (!(tx_ring[current].status & E1000_TXD_STAT_DD))
+    return -1; // a previous transmission is still in flight
+  else if (tx_mbufs[current] != 0)
+    mbuffree(tx_mbufs[current]);
+
+  tx_ring[current].length = m->len;
+  tx_ring[current].addr = (uint64)m->head;
+  tx_ring[current].cmd = E1000_TXD_CMD_EOP | E1000_TXD_CMD_RS; // NOTICE not sure
+  
+  tx_mbufs[current] = m; // NOTICE stash away pointer, I think... Maybe wrong
+
+  regs[E1000_TDT] = (current + 1) % TX_RING_SIZE;
+
+  return 0;
 }
 
 static void
@@ -114,6 +134,19 @@ e1000_recv(void)
   // Check for packets that have arrived from the e1000
   // Create and deliver an mbuf for each packet (using net_rx()).
   //
+  uint next = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
+
+  while (rx_ring[next].status & E1000_RXD_STAT_DD) {
+    rx_mbufs[next]->len = rx_ring[next].length;
+    printf("e1000_recv: receive packet\n");
+    net_rx(rx_mbufs[next]);
+    
+    rx_mbufs[next] = mbufalloc(0);
+    rx_ring[next].addr = (uint64) rx_mbufs[next]->head;
+    rx_ring[next].status = 0;
+    regs[E1000_RDT] = next;
+    next = (next + 1) % RX_RING_SIZE;
+  }
 }
 
 void
