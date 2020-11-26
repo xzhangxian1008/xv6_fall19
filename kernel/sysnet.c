@@ -90,22 +90,54 @@ bad:
 //
 
 void
-sockclose(struct sock *s) // NOTIC I'm not sure he parameter
+sockclose(struct sock *s) // NOTICE I'm not sure the parameter
 {
-  // TODO
+  if (s == 0)
+    return;
+
+  struct sock *tmp;
+  acquire(&lock);
+
+  acquire(&s->lock);
+  struct mbuf *m = mbufq_pophead(&s->rxq);
+  while (m) {
+    mbuffree(m);
+    m = mbufq_pophead(&s->rxq);
+  }
+  release(&s->lock);
+
+  // pick the socket from sockets list out
+  while (1) {
+    if (sockets == s) {
+      sockets = s->next;
+      break;
+    }
+
+    tmp = sockets;
+    while (tmp != 0 && tmp->next != s)
+      tmp = tmp->next;
+    
+    if (tmp == 0) {
+      release(&lock);
+      return;
+    }
+
+    tmp->next = tmp->next->next;
+  }
+  release(&lock);
 }
 
+// from the test's requirement, we can know that the read function reads only one packet each time
 int
 sockread(struct sock *s, uint64 addr, int n)
 {
-  // TODO
   while (1) {
     acquire(&s->lock);
     if (!mbufq_empty(&s->rxq))
       break;
-    release(&s->lock);
 
-    sleep(s, 0);
+    sleep(s, &s->lock);
+    release(&s->lock);
   }
   
   struct mbuf *m;
@@ -113,29 +145,61 @@ sockread(struct sock *s, uint64 addr, int n)
   uint sum = 0;
   pagetable_t pagetable = myproc()->pagetable;
 
-  // NOTICE how about the left data if we can't read all of the data in a mbuf?
-  // NOTICE we discard them in the current implementation
-  while (n > 0) {
-    m = mbufq_pophead(&s->rxq);
+  m = mbufq_pophead(&s->rxq);
+  if (m) {
     num = min(m->len, n);
+
     if (copyout(pagetable, addr, m->head, num)) {
       printf("sockread: copyout error!\n");
+      release(&s->lock);
       return sum;
     }
 
     sum += num;
-    addr += num;
-    n -= num;
     mbuffree(m);
   }
 
+  release(&s->lock);
   return sum;
 }
 
 int
 sockwrite(struct sock *s, uint64 addr, int n)
 {
-  // TODO
+  uint header_size = sizeof(struct udp) + sizeof(struct ip) + sizeof(struct eth);
+  pagetable_t pagetable = myproc()->pagetable;
+  struct mbuf *m;
+  uint sum = 0;
+  uint len;
+  
+  while (n > 0) {
+    m = mbufalloc(header_size);
+    len = MBUF_SIZE - header_size;
+    len = min(len, n);
+    mbufput(m, len);
+    if (copyin(pagetable, m->head, addr, len))
+      panic("sockwrite: copyin error!");
+    net_tx_udp(m, s->raddr, s->lport, s->rport);
+    addr += len;
+    n -= len;
+    sum += len;
+  }
+
+  return sum;
+}
+
+struct sock*
+findsock(uint32 raddr, uint16 lport, uint16 rport)
+{
+  struct sock *s = sockets;
+  acquire(&lock);
+  while (s) {
+    if (s->raddr == raddr && s->lport == lport && s->rport == rport)
+      break;
+    s = s->next; 
+  }
+  release(&lock);
+  return s;
 }
 
 // called by protocol handler layer to deliver UDP packets
@@ -149,6 +213,12 @@ sockrecvudp(struct mbuf *m, uint32 raddr, uint16 lport, uint16 rport)
   // any sleeping reader. Free the mbuf if there are no sockets
   // registered to handle it.
   //
-  // TODO
-  mbuffree(m);
+  struct sock *s = findsock(raddr, lport, rport);
+  if (s) { // discard the packets without corresponding socket
+    acquire(&s->lock);
+    mbufq_pushtail(&s->rxq, m);
+    release(&s->lock);
+
+    wakeup(s);
+  }
 }

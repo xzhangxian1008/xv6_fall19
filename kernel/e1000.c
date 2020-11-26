@@ -138,7 +138,6 @@ e1000_recv(void)
 
   while (rx_ring[next].status & E1000_RXD_STAT_DD) {
     rx_mbufs[next]->len = rx_ring[next].length;
-    printf("e1000_recv: receive packet\n");
     net_rx(rx_mbufs[next]);
     
     rx_mbufs[next] = mbufalloc(0);
